@@ -19,10 +19,15 @@ class PDModelClient:
         self._endpoint_name = settings.sagemaker_endpoint_name
         self._client = boto3.client("sagemaker-runtime", region_name=settings.aws_region)
 
-    def predict(self, features: dict, explain: bool = False) -> dict:
-        payload = dict(features)
-        if explain:
-            payload["explain"] = True
+    def predict(self, features: dict | list[dict], explain: bool = False) -> dict | list[dict]:
+        """features: a single borrower dict, or a list for a batch request.
+        explain is only meaningful for a single-borrower request."""
+        if isinstance(features, dict):
+            payload = dict(features)
+            if explain:
+                payload["explain"] = True
+        else:
+            payload = list(features)
         response = self._client.invoke_endpoint(
             EndpointName=self._endpoint_name,
             ContentType="application/json",
