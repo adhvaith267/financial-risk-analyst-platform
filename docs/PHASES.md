@@ -81,7 +81,22 @@ design doc, just a running checklist.
       than answering from the model's own training data
 
 ## Phase 8 — React frontend
-- [ ] Dashboard, Credit/Market/Stress views, AI Analyst chat
+- [x] Vite + React (JS, no TypeScript/Next.js, per the architecture doc's
+      explicit stance) + react-router-dom + axios. Scaffolded by hand -
+      Node 18.19.1 in this environment is too old for the current
+      `create-vite` CLI (needs Node 20.19+/22.12+), so wrote package.json/
+      vite.config.js/index.html directly with Node-18-compatible versions.
+- [x] Dashboard, Credit Risk, Market Risk, Stress Testing, AI Analyst
+      (chat) pages - each calls its corresponding backend endpoint
+- [x] CORS enabled on FastAPI for the Vite dev origin
+- [x] `npm run build` succeeds cleanly; verified via curl that all SPA
+      routes serve 200 and CORS preflight/actual cross-origin requests
+      succeed end-to-end
+- [ ] **Not visually/interactively verified in an actual browser** - no
+      browser automation tool was available this session (user declined
+      the Chrome extension). Structural verification only; recommend a
+      manual click-through (`cd frontend && npm run dev`, backend running
+      separately) before treating this phase as fully done.
 
 ## Phase 9 — AWS deployment
 - [ ] ECS/Fargate for backend, Amplify for frontend - needs deployment
