@@ -1,0 +1,197 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3ProjectBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:PutObjectAcl"
+      ],
+      "Resource": [
+        "arn:aws:s3:::financial-risk-analyst-*",
+        "arn:aws:s3:::financial-risk-analyst-*/*",
+        "arn:aws:s3:::sagemaker-ap-south-1-575264900919",
+        "arn:aws:s3:::sagemaker-ap-south-1-575264900919/*"
+      ]
+    },
+    {
+      "Sid": "S3CreateProjectBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:PutBucketPolicy",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketVersioning"
+      ],
+      "Resource": "arn:aws:s3:::financial-risk-analyst-*"
+    },
+    {
+      "Sid": "S3ListAll",
+      "Effect": "Allow",
+      "Action": "s3:ListAllMyBuckets",
+      "Resource": "*"
+    },
+    {
+      "Sid": "RDSFull",
+      "Effect": "Allow",
+      "Action": "rds:*",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "ap-south-1" }
+      }
+    },
+    {
+      "Sid": "SageMakerFull",
+      "Effect": "Allow",
+      "Action": "sagemaker:*",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "ap-south-1" }
+      }
+    },
+    {
+      "Sid": "BedrockFull",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECSFull",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:*",
+        "ecr:*",
+        "elasticloadbalancing:*",
+        "application-autoscaling:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "ap-south-1" }
+      }
+    },
+    {
+      "Sid": "EC2Networking",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "ec2:GetSecurityGroupsForVpc",
+        "ec2:CreateVpc",
+        "ec2:CreateSubnet",
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:CreateRouteTable",
+        "ec2:CreateRoute",
+        "ec2:AssociateRouteTable",
+        "ec2:CreateInternetGateway",
+        "ec2:AttachInternetGateway",
+        "ec2:CreateNatGateway",
+        "ec2:AllocateAddress",
+        "ec2:ModifyVpcAttribute",
+        "ec2:ModifySubnetAttribute",
+        "ec2:CreateTags",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSubnet",
+        "ec2:DeleteVpc",
+        "ec2:DeleteRouteTable",
+        "ec2:DeleteInternetGateway",
+        "ec2:DetachInternetGateway",
+        "ec2:DeleteNatGateway",
+        "ec2:ReleaseAddress"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SecretsManagerProject",
+      "Effect": "Allow",
+      "Action": "secretsmanager:*",
+      "Resource": "arn:aws:secretsmanager:ap-south-1:575264900919:secret:fra/*"
+    },
+    {
+      "Sid": "Observability",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:*",
+        "logs:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "ap-south-1" }
+      }
+    },
+    {
+      "Sid": "Amplify",
+      "Effect": "Allow",
+      "Action": "amplify:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PassExistingRoles",
+      "Effect": "Allow",
+      "Action": ["iam:PassRole", "iam:GetRole"],
+      "Resource": [
+        "arn:aws:iam::575264900919:role/FinancialRiskSageMakerExecutionRole",
+        "arn:aws:iam::575264900919:role/FRA-*"
+      ]
+    },
+    {
+      "Sid": "ManageProjectRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:TagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::575264900919:role/FRA-*"
+    },
+    {
+      "Sid": "STSIdentity",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "BedrockMarketplaceModelAccess",
+      "Effect": "Allow",
+      "Action": [
+        "aws-marketplace:ViewSubscriptions",
+        "aws-marketplace:Subscribe"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ServiceLinkedRoles",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": [
+            "rds.amazonaws.com",
+            "ecs.amazonaws.com",
+            "elasticloadbalancing.amazonaws.com",
+            "sagemaker.amazonaws.com"
+          ]
+        }
+      }
+    }
+  ]
+}

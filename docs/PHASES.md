@@ -99,9 +99,35 @@ design doc, just a running checklist.
       separately) before treating this phase as fully done.
 
 ## Phase 9 — AWS deployment
-- [ ] ECS/Fargate for backend, Amplify for frontend - needs deployment
-      architecture decisions, will ask before provisioning
+- [x] AWS decisions made: public subnets/no NAT Gateway for ECS (avoids
+      ~$32-45/mo fixed cost), GitHub-connected Amplify CI/CD (installed
+      `gh` CLI without sudo, user authenticated it), no custom domain yet
+      (HTTP on ALB's default DNS, HTTPS automatic on Amplify's own domain)
+- [x] Backend: `backend/Dockerfile` (uv-based, fixed a real bug where
+      `uv run` re-syncs dev deps from PyPI at container startup by
+      default - added `--no-sync`), pushed to ECR (`fra-backend`)
+- [x] `FRA-EcsTaskExecutionRole` (pulls image, writes logs, reads DB
+      password from Secrets Manager) + `FRA-BackendTaskRole` (app's own
+      SageMaker/Bedrock permissions) - `infra/scripts/06_setup_ecs_iam.sh`
+- [x] ALB (`fra-backend-alb`, public, port 80) + target group (health
+      check `/health`) + `fra-alb-sg` (80 from internet) -> `fra-app-sg`
+      (8000 from ALB only) -> ECS Fargate service (`fra-cluster` /
+      `fra-backend-svc`, 1 task, public subnets) -
+      `infra/scripts/05_deploy_backend_ecs.sh`
+- [x] Frontend: pushed platform repo to GitHub (`adhvaith267/financial-risk-analyst-platform`),
+      Amplify app connected via GitHub App (using `gh`'s token to
+      authorize, not stored by Amplify), `VITE_API_BASE_URL` env var
+      points at the ALB - `infra/scripts/07_deploy_frontend_amplify.sh`
+- [x] RDS reverted to `--no-publicly-accessible`; ECS tasks reach it via
+      `fra-app-sg` -> `fra-rds-sg` (set up back in Phase 1), not a public
+      route. Removed the temporary dev-IP security group rule.
+- [x] Verified live end-to-end post-lockdown: credit/market/stress/agent
+      all work through the ALB with RDS private
+- [ ] **Not visually verified in a browser** (see Phase 8) - recommend a
+      manual click-through of the live Amplify URL
 
 ## Phase 10 — Security + audit + testing pass
-- [ ] Revert RDS to private once ECS is in place
-- [ ] Review IAM policy scope end to end
+- [x] RDS reverted to private (done above)
+- [ ] Review IAM policy scope end to end (`infra/fra-dev-iam-policy.json`
+      has grown through this build - worth a final pass before treating
+      this as production-ready)

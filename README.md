@@ -10,6 +10,16 @@ repo, [`financial-risk-analyst-ml`](../financial-risk-analyst-ml), and is
 served from a SageMaker real-time endpoint (`gmsc-pd-endpoint`). This repo
 consumes that endpoint; it never re-implements or approximates PD.
 
+## Live
+
+- Frontend: https://master.d97yoeq2bkvvs.amplifyapp.com
+- Backend API: http://fra-backend-alb-2126259273.ap-south-1.elb.amazonaws.com
+  (HTTP only, no custom domain yet - see Phase 9 in `docs/PHASES.md`)
+
+Not yet visually verified in an actual browser (no browser automation tool
+was available when this was deployed) - do a manual click-through before
+relying on the frontend as fully validated.
+
 ## Layout
 
 ```
@@ -31,16 +41,16 @@ docs/       Architecture notes, RAG source documents.
   Amplify). No IAM user/policy management, Organizations, or billing access.
   CLI profile: `fra-dev`.
 - RDS: `fra-postgres-dev`, PostgreSQL 17.10, `db.t4g.micro`, 20GB gp3,
-  security group `fra-rds-sg` (inbound 5432 restricted to the app SG
-  `fra-app-sg` plus, temporarily, one dev IP - see below). Provisioned via
-  `infra/scripts/01_provision_rds.sh`. Master password lives in Secrets
-  Manager at `fra/rds/master-password`, never in this repo.
-  **Temporarily set `--publicly-accessible`** so local dev machines can
-  reach it directly (the security group still only allows the one IP that
-  ran `infra/scripts/03_allow_dev_ip.sh` - see that script's tag
-  `purpose=local-dev-access` on the SG rule). Revert with
-  `aws rds modify-db-instance --db-instance-identifier fra-postgres-dev --no-publicly-accessible`
-  once the backend runs inside the VPC (ECS) and no longer needs laptop access.
+  **private** (not publicly accessible) - security group `fra-rds-sg`
+  allows inbound 5432 only from `fra-app-sg`, which both the ECS backend
+  and local dev (once you run `03_allow_dev_ip.sh`, see below) use.
+  Provisioned via `infra/scripts/01_provision_rds.sh`. Master password
+  lives in Secrets Manager at `fra/rds/master-password`, never in this repo.
+  For local dev machine access, temporarily flip `--publicly-accessible`
+  and run `infra/scripts/03_allow_dev_ip.sh` (whitelists your current IP
+  only); revert with
+  `aws rds modify-db-instance --db-instance-identifier fra-postgres-dev --no-publicly-accessible --profile fra-dev`
+  when done - the deployed ECS backend doesn't need this at all.
 - SageMaker: existing `FinancialRiskSageMakerExecutionRole` and trained
   GMSC PD models from the ML repo - reused, not recreated here. The
   real-time endpoint (`gmsc-pd-endpoint`) is deployed via that repo's
@@ -101,6 +111,23 @@ Source docs live in `docs/rag/*.md`. Embeddings use
 nearest-neighbor via pgvector's `<=>` operator (`app/engines/retrieval.py`),
 exposed to the agent as the `search_risk_methodology` tool.
 
+## Deployment
+
+```bash
+../infra/scripts/06_setup_ecs_iam.sh       # one-time: task execution + task roles
+../infra/scripts/05_deploy_backend_ecs.sh  # build, push to ECR, deploy/redeploy on Fargate behind an ALB
+../infra/scripts/07_deploy_frontend_amplify.sh  # connect/redeploy Amplify from GitHub
+```
+
+Backend: ECR (`fra-backend`) -> ECS Fargate (`fra-cluster`/`fra-backend-svc`,
+1 task, public subnets, no NAT Gateway) -> ALB (`fra-backend-alb`, port 80).
+`FRA-EcsTaskExecutionRole` reads the DB password from Secrets Manager and
+writes logs; `FRA-BackendTaskRole` is what the running app itself uses to
+call SageMaker/Bedrock (no more `AWS_PROFILE` env var needed in production -
+that was only a local-dev workaround for boto3 defaulting to the root
+profile). Frontend: GitHub (`adhvaith267/financial-risk-analyst-platform`)
+-> Amplify Hosting, `VITE_API_BASE_URL` points at the ALB.
+
 ## Status
 
 - [x] Phase 0 - IAM (scoped user/policy for this project)
@@ -119,5 +146,8 @@ exposed to the agent as the `search_risk_methodology` tool.
       see the Bedrock note above re: Claude model access
 - [x] RAG - self-built on pgvector (existing RDS) instead of managed
       Bedrock Knowledge Bases, see below
-- [ ] React frontend
-- [ ] AWS deployment (ECS/Fargate, Amplify)
+- [x] React frontend - Dashboard, Credit/Market/Stress views, AI Analyst
+      chat; not yet visually verified in an actual browser
+- [x] AWS deployment - ECS/Fargate + ALB (backend), Amplify + GitHub CI/CD
+      (frontend), RDS reverted to private, live end-to-end (see Live above)
+- [ ] Phase 10 - security/audit pass (IAM policy review), see `docs/PHASES.md`
