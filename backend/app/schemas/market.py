@@ -15,3 +15,11 @@ class MarketRiskResponse(BaseModel):
     hhi: float
     max_position_weight: float
     weights: dict[str, float]
+    correlation_matrix: dict[str, dict[str, float]]
+    value_history: list[dict]
+    risk_drivers: list[str]
+
+
+class PortfolioSummary(BaseModel):
+    portfolio_id: str
+    name: str

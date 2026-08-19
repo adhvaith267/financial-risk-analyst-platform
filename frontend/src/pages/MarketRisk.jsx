@@ -1,20 +1,38 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import api from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
 import Stat from '../components/Stat.jsx'
 import BarRow from '../components/BarRow.jsx'
+import EntitySelect from '../components/EntitySelect.jsx'
+import LineChart from '../components/LineChart.jsx'
+import CorrelationMatrix from '../components/CorrelationMatrix.jsx'
 import { formatCurrency, formatPercent } from '../format.js'
 
 const SERIES_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)']
 
 export default function MarketRisk() {
-  const [portfolioId, setPortfolioId] = useState('P001')
+  const [portfolios, setPortfolios] = useState([])
+  const [portfoliosLoading, setPortfoliosLoading] = useState(true)
+  const [portfolioId, setPortfolioId] = useState('')
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [view, setView] = useState('history') // 'history' | 'correlation'
+
+  useEffect(() => {
+    api
+      .get('/market/portfolios')
+      .then(({ data }) => {
+        setPortfolios(data)
+        if (data.length > 0) setPortfolioId(data[0].portfolio_id)
+      })
+      .catch((err) => setError(err.response?.data?.detail || err.message))
+      .finally(() => setPortfoliosLoading(false))
+  }, [])
 
   async function assess(e) {
     e.preventDefault()
+    if (!portfolioId) return
     setLoading(true)
     setError(null)
     setResult(null)
@@ -46,13 +64,16 @@ export default function MarketRisk() {
       />
 
       <form className="inline-form" onSubmit={assess}>
-        <input
+        <EntitySelect
+          label=""
           value={portfolioId}
-          onChange={(e) => setPortfolioId(e.target.value)}
-          placeholder="Portfolio ID, e.g. P001"
+          onChange={setPortfolioId}
+          loading={portfoliosLoading}
+          placeholder="Select a portfolio"
+          options={portfolios.map((p) => ({ id: p.portfolio_id, label: `${p.portfolio_id} — ${p.name}` }))}
         />
-        <button type="submit" disabled={loading}>
-          {loading ? 'Calculating...' : 'Assess Portfolio'}
+        <button type="submit" disabled={loading || !portfolioId}>
+          {loading ? 'Calculating…' : 'Analyze'}
         </button>
       </form>
 
@@ -65,20 +86,58 @@ export default function MarketRisk() {
           </div>
 
           <div className="stat-grid">
-            <Stat label="Annualized Volatility" value={formatPercent(result.annualized_volatility)} />
-            <Stat label="Historical VaR (95%)" value={formatCurrency(result.historical_var_95)} />
-            <Stat label="Historical VaR (99%)" value={formatCurrency(result.historical_var_99)} />
-            <Stat label="Parametric VaR (95%)" value={formatCurrency(result.parametric_var_95)} />
-            <Stat label="Expected Shortfall (95%)" value={formatCurrency(result.expected_shortfall_95)} />
-            <Stat label="Max Drawdown" value={formatPercent(result.max_drawdown)} tone="warn" />
-            <Stat label="Concentration (HHI)" value={result.hhi.toFixed(3)} />
-            <Stat label="Largest Position" value={formatPercent(result.max_position_weight)} />
+            <Stat label="Annualized Volatility" value={formatPercent(result.annualized_volatility)} delay={0} />
+            <Stat label="Historical VaR (95%)" value={formatCurrency(result.historical_var_95)} delay={30} />
+            <Stat label="Historical VaR (99%)" value={formatCurrency(result.historical_var_99)} delay={60} />
+            <Stat label="Parametric VaR (95%)" value={formatCurrency(result.parametric_var_95)} delay={90} />
+            <Stat label="Expected Shortfall (95%)" value={formatCurrency(result.expected_shortfall_95)} delay={120} />
+            <Stat label="Max Drawdown" value={formatPercent(result.max_drawdown)} tone="warn" delay={150} />
+            <Stat label="Concentration (HHI)" value={result.hhi.toFixed(3)} delay={180} />
+            <Stat label="Largest Position" value={formatPercent(result.max_position_weight)} delay={210} />
           </div>
 
-          <div className="card">
-            <h3>Portfolio Weights</h3>
+          <div className="card fade-in" style={{ animationDelay: '250ms' }}>
+            <h3>Portfolio Composition</h3>
             <BarRow items={weightItems} formatValue={formatPercent} />
           </div>
+
+          <div className="card fade-in" style={{ animationDelay: '290ms' }}>
+            <div className="card-header-row">
+              <h3 style={{ margin: 0 }}>{view === 'history' ? 'Historical Value' : 'Correlation Matrix'}</h3>
+              <div className="view-toggle">
+                <button
+                  type="button"
+                  className={view === 'history' ? 'active' : ''}
+                  onClick={() => setView('history')}
+                >
+                  Historical Value
+                </button>
+                <button
+                  type="button"
+                  className={view === 'correlation' ? 'active' : ''}
+                  onClick={() => setView('correlation')}
+                >
+                  Correlation Matrix
+                </button>
+              </div>
+            </div>
+            {view === 'history' ? (
+              <LineChart data={result.value_history} />
+            ) : (
+              <CorrelationMatrix matrix={result.correlation_matrix} />
+            )}
+          </div>
+
+          {result.risk_drivers?.length > 0 && (
+            <div className="card fade-in" style={{ animationDelay: '330ms' }}>
+              <h3>Risk Drivers</h3>
+              <ul className="driver-list">
+                {result.risk_drivers.map((driver, i) => (
+                  <li key={i}>{driver}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>

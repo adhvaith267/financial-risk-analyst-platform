@@ -21,3 +21,4 @@ class StressResultResponse(BaseModel):
     stressed_portfolio_value: float
     baseline_total_expected_loss: float
     stressed_total_expected_loss: float
+    vulnerabilities: list[str]

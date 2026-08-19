@@ -1,12 +1,25 @@
+import json
 import re
 from functools import lru_cache
 
 from langchain_aws import ChatBedrockConverse
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import create_react_agent
 
 from app.agent.tools import build_tools
 from app.core.config import get_settings
+
+# Human-readable label templates for each tool, filled in from that call's
+# arguments. Falls back to the raw tool name for anything not listed here.
+TOOL_TRACE_LABELS = {
+    "get_borrower": "Retrieved borrower {borrower_id}",
+    "get_portfolio": "Retrieved portfolio {portfolio_id}",
+    "assess_credit_risk": "Calculated credit risk for {borrower_id}",
+    "assess_market_risk": "Calculated market risk for {portfolio_id}",
+    "run_stress_scenario": "Ran stress scenario on {portfolio_id}",
+    "search_risk_methodology": 'Searched risk methodology for "{query}"',
+}
 
 SYSTEM_PROMPT = """You are a Risk Analyst Agent for a financial organization.
 
@@ -62,7 +75,55 @@ def _extract_text(content: str | list) -> str:
     return text.strip()
 
 
-def ask(question: str) -> str:
+def _build_trace(messages: list) -> list[dict]:
+    """Reconstructs the agent's tool-call sequence from the actual LangGraph
+    message history - not a canned/simulated trace. AIMessage.tool_calls give
+    call order + arguments; the matching ToolMessage (by tool_call_id) gives
+    whether that call succeeded (ToolMessage.status, set by LangGraph's
+    ToolNode based on whether the tool raised)."""
+    tool_calls: dict[str, dict] = {}
+    call_order: list[str] = []
+    for msg in messages:
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            for call in msg.tool_calls:
+                tool_calls[call["id"]] = {"name": call["name"], "args": call.get("args", {})}
+                call_order.append(call["id"])
+
+    tool_results: dict[str, ToolMessage] = {
+        msg.tool_call_id: msg for msg in messages if isinstance(msg, ToolMessage)
+    }
+
+    trace = []
+    for call_id in call_order:
+        call = tool_calls[call_id]
+        name = call["name"]
+        template = TOOL_TRACE_LABELS.get(name, name)
+        try:
+            label = template.format(**call["args"])
+        except (KeyError, IndexError):
+            label = name
+
+        result_msg = tool_results.get(call_id)
+        status = "error" if result_msg is not None and result_msg.status == "error" else "ok"
+        # Tools in this codebase signal a handled failure (e.g. "borrower not
+        # found") as a normal string return containing {"error": ...}, not a
+        # raised exception - ToolMessage.status alone won't catch that case.
+        if result_msg is not None and status == "ok" and isinstance(result_msg.content, str):
+            try:
+                parsed = json.loads(result_msg.content)
+                if isinstance(parsed, dict) and "error" in parsed:
+                    status = "error"
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        trace.append({"tool": name, "label": label, "status": status})
+
+    return trace
+
+
+def ask(question: str) -> tuple[str, list[dict]]:
     agent = build_agent()
     result = agent.invoke({"messages": [("user", question)]})
-    return _extract_text(result["messages"][-1].content)
+    answer = _extract_text(result["messages"][-1].content)
+    trace = _build_trace(result["messages"])
+    return answer, trace

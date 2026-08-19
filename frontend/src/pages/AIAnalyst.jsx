@@ -2,6 +2,8 @@ import { useState } from 'react'
 import api from '../api.js'
 import PageHeader from '../components/PageHeader.jsx'
 import MarkdownText from '../components/MarkdownText.jsx'
+import AgentTrace from '../components/AgentTrace.jsx'
+import EvidencePanel from '../components/EvidencePanel.jsx'
 
 const examples = [
   'Assess borrower B1001 and explain the major factors driving the risk.',
@@ -25,7 +27,7 @@ export default function AIAnalyst() {
     setLoading(true)
     try {
       const { data } = await api.post('/agent/ask', { question: q })
-      setMessages((prev) => [...prev, { role: 'agent', text: data.answer }])
+      setMessages((prev) => [...prev, { role: 'agent', text: data.answer, trace: data.trace }])
     } catch (err) {
       const detail = err.response?.data?.detail || err.message
       setMessages((prev) => [...prev, { role: 'error', text: detail }])
@@ -58,7 +60,11 @@ export default function AIAnalyst() {
               {m.role === 'user' ? 'You' : m.role === 'agent' ? 'Risk Analyst Agent' : 'Error'}
             </div>
             {m.role === 'agent' ? (
-              <MarkdownText text={m.text} />
+              <>
+                <AgentTrace steps={m.trace} />
+                <MarkdownText text={m.text} />
+                <EvidencePanel trace={m.trace} />
+              </>
             ) : (
               <div className="chat-text">{m.text}</div>
             )}
@@ -67,7 +73,7 @@ export default function AIAnalyst() {
         {loading && (
           <div className="chat-message chat-agent">
             <div className="chat-role">Risk Analyst Agent</div>
-            <div className="chat-text chat-loading">Thinking, calling tools...</div>
+            <div className="chat-text chat-loading">Thinking, calling tools…</div>
           </div>
         )}
       </div>
@@ -79,7 +85,7 @@ export default function AIAnalyst() {
           placeholder="Ask about a borrower, portfolio, or scenario..."
         />
         <button type="submit" disabled={loading}>
-          Send
+          Analyze
         </button>
       </form>
     </div>

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, String
+from sqlalchemy import JSON, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -16,7 +16,7 @@ class RiskResult(Base):
     entity_id: Mapped[str] = mapped_column(String(20))
     risk_type: Mapped[str] = mapped_column(String(20))  # "credit" | "market"
     payload: Mapped[dict] = mapped_column(JSON)  # pd/lgd/ead/el or var/es/volatility/... + model_version
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="now()")
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class StressResult(Base):
@@ -31,4 +31,4 @@ class StressResult(Base):
     market_loss: Mapped[float | None] = mapped_column(nullable=True)
     credit_loss: Mapped[float | None] = mapped_column(nullable=True)
     combined_loss: Mapped[float | None] = mapped_column(nullable=True)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="now()")
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

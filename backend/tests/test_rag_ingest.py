@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from ingest_rag_docs import chunk_markdown  # noqa: E402
+from ingest_rag_docs import chunk_markdown
 
 
 def test_chunks_by_heading():

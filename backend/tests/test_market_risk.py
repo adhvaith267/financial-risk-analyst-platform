@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from app.engines.market_risk import compute_market_risk
+from app.engines.market_risk import _derive_risk_drivers, compute_market_risk
 
 
 @pytest.fixture
@@ -61,3 +61,23 @@ def test_risk_metrics_are_internally_consistent(prices, quantities):
 def test_raises_on_unknown_portfolio_with_no_holdings():
     with pytest.raises(ValueError):
         compute_market_risk("EMPTY", pd.DataFrame(), pd.Series(dtype=float))
+
+
+def test_risk_drivers_flags_concentration_and_high_correlation():
+    weights = pd.Series({"AAPL": 0.70, "TLT": 0.30})
+    correlation_matrix = {"AAPL": {"AAPL": 1.0, "TLT": 0.85}, "TLT": {"AAPL": 0.85, "TLT": 1.0}}
+
+    drivers = _derive_risk_drivers(weights, correlation_matrix)
+
+    assert any("Concentrated position in AAPL" in d for d in drivers)
+    assert any("High correlation between AAPL and TLT" in d for d in drivers)
+
+
+def test_risk_drivers_empty_when_diversified_and_uncorrelated():
+    # 6 equal weights (~16.7% each) - under the 20% concentration threshold.
+    weights = pd.Series({a: 1 / 6 for a in ["AAPL", "MSFT", "JPM", "GOOG", "TLT", "CASH"]})
+    correlation_matrix = {
+        a: {b: (1.0 if a == b else 0.1) for b in weights.index} for a in weights.index
+    }
+
+    assert _derive_risk_drivers(weights, correlation_matrix) == []

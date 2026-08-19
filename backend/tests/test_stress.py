@@ -1,7 +1,12 @@
 import pandas as pd
 import pytest
 
-from app.engines.stress import StressScenario, apply_default_shock, apply_market_shock
+from app.engines.stress import (
+    StressScenario,
+    apply_default_shock,
+    apply_market_shock,
+    derive_vulnerabilities,
+)
 from app.models.borrower import Loan
 
 
@@ -71,3 +76,33 @@ def test_default_shock_clips_pd_at_one():
 def test_no_active_loans_means_zero_credit_loss():
     credit_loss, baseline_el, stressed_el = apply_default_shock([], [], StressScenario("x", 0, 0, 0))
     assert (credit_loss, baseline_el, stressed_el) == (0.0, 0.0, 0.0)
+
+
+def test_derive_vulnerabilities_flags_concentration_and_shocked_exposures(scenario):
+    # AAPL is 10*100=1000 of a 1090 total portfolio (~92%) - well past the
+    # 20% concentration threshold, and both equity and bond shocks are
+    # non-zero in `scenario`, so all three vulnerability types should fire.
+    prices = pd.Series({"AAPL": 100.0, "TLT": 9.0})
+    quantities = pd.Series({"AAPL": 10.0, "TLT": 1.0})
+    asset_classes = {"AAPL": "equity", "TLT": "bond"}
+
+    vulnerabilities = derive_vulnerabilities(prices, quantities, asset_classes, scenario)
+
+    assert any("Concentrated position in AAPL" in v for v in vulnerabilities)
+    assert any("Equity exposure" in v for v in vulnerabilities)
+    assert any("Rate-sensitive bond holdings" in v for v in vulnerabilities)
+
+
+def test_derive_vulnerabilities_empty_when_diversified_and_unshocked():
+    # 6 equal-value holdings (~16.7% each) - under the 20% concentration
+    # threshold - with a zero-magnitude scenario, so neither the equity nor
+    # bond exposure flags fire either.
+    assets = ["AAPL", "MSFT", "JPM", "GOOG", "TLT", "CASH"]
+    prices = pd.Series({a: 100.0 for a in assets})
+    quantities = pd.Series({a: 1.0 for a in assets})
+    asset_classes = {"AAPL": "equity", "MSFT": "equity", "JPM": "equity", "GOOG": "equity", "TLT": "bond", "CASH": "cash"}
+    zero_scenario = StressScenario(name="none", equity_shock=0.0, rate_shock_bps=0.0, default_shock=0.0)
+
+    vulnerabilities = derive_vulnerabilities(prices, quantities, asset_classes, zero_scenario)
+
+    assert vulnerabilities == []

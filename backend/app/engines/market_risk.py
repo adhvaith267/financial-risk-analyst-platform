@@ -10,6 +10,13 @@ from app.models.market import MarketPrice, PortfolioHolding
 TRADING_DAYS_PER_YEAR = 252
 # One-sided normal z-scores, used for parametric VaR.
 Z_SCORES = {0.95: 1.645, 0.99: 2.326}
+# A single position at or above this weight is called out as a concentration
+# risk driver on its own.
+CONCENTRATION_THRESHOLD = 0.20
+# Two holdings moving this closely together add correlation risk beyond
+# what the weights alone show - a "diversified-looking" portfolio can still
+# fall together if its pieces are highly correlated.
+HIGH_CORRELATION_THRESHOLD = 0.70
 
 
 @dataclass
@@ -27,6 +34,9 @@ class MarketRiskAssessment:
     hhi: float
     max_position_weight: float
     weights: dict[str, float]
+    correlation_matrix: dict[str, dict[str, float]]
+    value_history: list[dict]
+    risk_drivers: list[str]
 
 
 def load_portfolio_data(db: Session, portfolio_id: str) -> tuple[pd.DataFrame, pd.Series]:
@@ -51,6 +61,26 @@ def load_portfolio_data(db: Session, portfolio_id: str) -> tuple[pd.DataFrame, p
     ).sort_index()
 
     return prices, quantities
+
+
+def _derive_risk_drivers(weights: pd.Series, correlation_matrix: dict[str, dict[str, float]]) -> list[str]:
+    """Pure: plain-language labels for what's driving this portfolio's risk,
+    derived only from data already computed above (weights, correlation) -
+    not a separate model."""
+    drivers = []
+
+    top_asset = weights.idxmax()
+    if weights[top_asset] >= CONCENTRATION_THRESHOLD:
+        drivers.append(f"Concentrated position in {top_asset} ({weights[top_asset]:.0%} of portfolio)")
+
+    assets = list(weights.index)
+    for i, asset_a in enumerate(assets):
+        for asset_b in assets[i + 1 :]:
+            corr = correlation_matrix.get(asset_a, {}).get(asset_b)
+            if corr is not None and corr >= HIGH_CORRELATION_THRESHOLD:
+                drivers.append(f"High correlation between {asset_a} and {asset_b} ({corr:.2f})")
+
+    return drivers
 
 
 def compute_market_risk(
@@ -94,6 +124,23 @@ def compute_market_risk(
     hhi = float((weights**2).sum())
     max_position_weight = float(weights.max())
 
+    # Pairwise correlation of daily returns - genuinely part of the risk
+    # picture (concentrated + highly-correlated is worse than concentrated
+    # alone), and cheap since `returns` is already computed above. A
+    # zero-variance series (e.g. cash) makes correlation undefined (NaN),
+    # which isn't valid JSON - fill with 0 (an asset with no variance has no
+    # linear relationship to anything, which 0 encodes correctly enough).
+    correlation_matrix = returns.corr().fillna(0.0).round(3).to_dict()
+
+    # Reconstructed portfolio value over the lookback window: today's
+    # holdings, priced at each historical day's close. Not a claim about
+    # what was actually held on those dates.
+    value_history = [
+        {"date": str(idx), "value": round(float(v), 2)} for idx, v in portfolio_value_series.items()
+    ]
+
+    risk_drivers = _derive_risk_drivers(weights, correlation_matrix)
+
     return MarketRiskAssessment(
         portfolio_id=portfolio_id,
         as_of=str(prices.index[-1]),
@@ -108,6 +155,9 @@ def compute_market_risk(
         hhi=hhi,
         max_position_weight=max_position_weight,
         weights={k: round(v, 4) for k, v in weights.to_dict().items()},
+        correlation_matrix=correlation_matrix,
+        value_history=value_history,
+        risk_drivers=risk_drivers,
     )
 
 

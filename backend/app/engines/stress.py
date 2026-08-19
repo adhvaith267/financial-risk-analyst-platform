@@ -34,6 +34,12 @@ class StressResult:
     stressed_portfolio_value: float
     baseline_total_expected_loss: float
     stressed_total_expected_loss: float
+    vulnerabilities: list[str]
+
+
+# Concentration above this weight in a single position is called out as a
+# vulnerability on its own (independent of the shock applied).
+CONCENTRATION_THRESHOLD = 0.20
 
 
 def _asset_price_shock(asset_class: str, scenario: StressScenario) -> float:
@@ -62,6 +68,43 @@ def apply_market_shock(
     return market_loss, baseline_value, stressed_value
 
 
+def derive_vulnerabilities(
+    latest_prices: pd.Series,
+    quantities: pd.Series,
+    asset_classes: dict[str, str],
+    scenario: StressScenario,
+) -> list[str]:
+    """Pure: plain-language labels for what's driving the loss, derived from
+    the same portfolio composition and shock magnitudes apply_market_shock
+    uses - not a separate model, just naming what's already there."""
+    dollar_positions = latest_prices * quantities
+    weights = dollar_positions / dollar_positions.sum()
+
+    vulnerabilities = []
+
+    top_asset = weights.idxmax()
+    if weights[top_asset] >= CONCENTRATION_THRESHOLD:
+        vulnerabilities.append(
+            f"Concentrated position in {top_asset} ({weights[top_asset]:.0%} of portfolio)"
+        )
+
+    equity_weight = sum(w for a, w in weights.items() if asset_classes.get(a) == "equity")
+    if equity_weight > 0 and scenario.equity_shock != 0:
+        vulnerabilities.append(
+            f"Equity exposure ({equity_weight:.0%} of portfolio) to the "
+            f"{scenario.equity_shock:+.0%} equity shock"
+        )
+
+    bond_weight = sum(w for a, w in weights.items() if asset_classes.get(a) == "bond")
+    if bond_weight > 0 and scenario.rate_shock_bps != 0:
+        vulnerabilities.append(
+            f"Rate-sensitive bond holdings ({bond_weight:.0%} of portfolio) to the "
+            f"+{scenario.rate_shock_bps:.0f}bps rate shock"
+        )
+
+    return vulnerabilities
+
+
 def apply_default_shock(
     loans: list[Loan], baseline_pds: list[float], scenario: StressScenario
 ) -> tuple[float, float, float]:
@@ -79,14 +122,20 @@ def apply_default_shock(
     return stressed_el - baseline_el, baseline_el, stressed_el
 
 
-def compute_market_loss(db: Session, portfolio_id: str, scenario: StressScenario) -> tuple[float, float, float]:
+def compute_market_loss(
+    db: Session, portfolio_id: str, scenario: StressScenario
+) -> tuple[float, float, float, list[str]]:
     prices, quantities = load_portfolio_data(db, portfolio_id)
     latest_prices = prices.dropna().iloc[-1]
 
     assets = db.scalars(select(Asset).where(Asset.asset_id.in_(quantities.index.tolist()))).all()
     asset_classes = {a.asset_id: a.asset_class for a in assets}
 
-    return apply_market_shock(latest_prices, quantities, asset_classes, scenario)
+    market_loss, baseline_value, stressed_value = apply_market_shock(
+        latest_prices, quantities, asset_classes, scenario
+    )
+    vulnerabilities = derive_vulnerabilities(latest_prices, quantities, asset_classes, scenario)
+    return market_loss, baseline_value, stressed_value, vulnerabilities
 
 
 def compute_credit_loss(db: Session, scenario: StressScenario) -> tuple[float, float, float]:
@@ -113,7 +162,7 @@ def compute_credit_loss(db: Session, scenario: StressScenario) -> tuple[float, f
 
 
 def run_stress_test(db: Session, portfolio_id: str, scenario: StressScenario) -> StressResult:
-    market_loss, baseline_value, stressed_value = compute_market_loss(db, portfolio_id, scenario)
+    market_loss, baseline_value, stressed_value, vulnerabilities = compute_market_loss(db, portfolio_id, scenario)
     credit_loss, baseline_el, stressed_el = compute_credit_loss(db, scenario)
 
     return StressResult(
@@ -126,4 +175,5 @@ def run_stress_test(db: Session, portfolio_id: str, scenario: StressScenario) ->
         stressed_portfolio_value=stressed_value,
         baseline_total_expected_loss=baseline_el,
         stressed_total_expected_loss=stressed_el,
+        vulnerabilities=vulnerabilities,
     )

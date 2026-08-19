@@ -53,4 +53,5 @@ def run(
         stressed_portfolio_value=result.stressed_portfolio_value,
         baseline_total_expected_loss=result.baseline_total_expected_loss,
         stressed_total_expected_loss=result.stressed_total_expected_loss,
+        vulnerabilities=result.vulnerabilities,
     )
