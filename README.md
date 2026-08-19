@@ -43,9 +43,11 @@ docs/       Architecture notes, RAG source documents.
   once the backend runs inside the VPC (ECS) and no longer needs laptop access.
 - SageMaker: existing `FinancialRiskSageMakerExecutionRole` and trained
   GMSC PD models from the ML repo - reused, not recreated here. The
-  real-time endpoint (`gmsc-pd-endpoint`) is deployed on demand via that
-  repo's `scripts/deploy_sagemaker.py` and is not left running by default
-  (ml.m5.xlarge bills hourly while up).
+  real-time endpoint (`gmsc-pd-endpoint`) is deployed via that repo's
+  `scripts/deploy_sagemaker.py` and is **currently InService** (ml.m5.xlarge,
+  bills ~$0.23/hr while up - intentionally left running). Tear down with
+  `aws sagemaker delete-endpoint --endpoint-name gmsc-pd-endpoint --profile fra-dev`
+  when no longer needed.
 
 ## Local dev setup
 
@@ -59,16 +61,30 @@ uv run alembic upgrade head        # first time: alembic revision --autogenerate
 uv run uvicorn app.main:app --reload
 ```
 
+## Demo data
+
+`backend/scripts/seed_demo_data.py` (idempotent, `AWS_PROFILE=fra-dev uv run
+python scripts/seed_demo_data.py`):
+
+- 30 borrowers/loans (`B1001`..`B1030`) sampled from the real GMSC training
+  CSV in S3 (`s3://financial-risk-analyst-adhvaith-2026/datasets/gmsc/raw/cs-training.csv`,
+  fixed `random_state=42`) - real credit-bureau attributes, not synthetic.
+  Loan `outstanding_balance`/`recovery_rate` are a simple heuristic on top
+  (mortgage vs. personal, income x debt ratio), clearly synthetic.
+- Portfolio `P001` ("Demo Balanced Portfolio"): 5 assets (AAPL, MSFT, JPM,
+  TLT, CASH) with ~2 years of **synthetic** daily price history (GBM, fixed
+  seed) - a placeholder until the real-world data phase (FRED/market API).
+- Plus the one hand-seeded `B102`/`L102` from the initial smoke test.
+
 ## Status
 
 - [x] Phase 0 - IAM (scoped user/policy for this project)
-- [x] Phase 1 - RDS PostgreSQL provisioned, migrated, seeded with a demo
-      borrower/loan (B102/L102); FastAPI verified end-to-end against RDS
-- [ ] Data ingestion (beyond the one demo borrower)
-- [~] Credit Risk Engine - implemented in `app/engines/credit_risk.py`,
-      calls the `gmsc-pd-endpoint` contract exactly (verified against the
-      ML repo's `inference.py`); blocked on that endpoint actually being
-      deployed to test live (currently no SageMaker endpoint is running)
+- [x] Phase 1 - RDS PostgreSQL provisioned, migrated
+- [x] Data ingestion - demo borrowers/loans (real GMSC sample) + demo
+      portfolio/market prices (synthetic) seeded, see above
+- [x] Credit Risk Engine - `app/engines/credit_risk.py`, verified live end
+      to end against the deployed `gmsc-pd-endpoint`
+      (`GET /credit/borrowers/{id}/assess` returns PD/LGD/EAD/EL/risk_drivers)
 - [ ] Market Risk Engine
 - [ ] Stress Testing Engine
 - [ ] LangGraph agent + Bedrock
