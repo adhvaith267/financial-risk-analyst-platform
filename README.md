@@ -188,9 +188,11 @@ of guessing.
 ├── frontend/
 │   └── src/
 │       ├── pages/                  Dashboard, CreditRisk, MarketRisk, StressTesting, AIAnalyst
-│       ├── components/             Sidebar, Stat, Meter, BarRow, Dumbbell, MarkdownText
+│       ├── components/             Sidebar, Stat, Meter, BarRow, Dumbbell, MarkdownText, AgentTrace, EvidencePanel, CorrelationMatrix, RecentAnalyses, EntitySelect, PageHeader, LineChart
+│       ├── hooks/                  useCountUp (number animation hook)
 │       ├── api.js                  Axios client
-│       └── format.js               Currency/percent formatting helpers
+│       ├── format.js               Currency/percent formatting helpers
+│       └── icons.jsx               Icon components
 │
 ├── docs/
 │   ├── OPERATIONS.md               Start/stop, data ingestion, troubleshooting
@@ -258,11 +260,11 @@ that's resolved).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
-| `GET` | `/dashboard/summary` | Portfolio/borrower counts + a headline market-risk snapshot |
+| `GET` | `/dashboard/summary` | Portfolio/borrower counts, headline market-risk snapshot, high-risk borrower count, top risk drivers, and recent analyses |
 | `GET` | `/credit/borrowers/{id}/assess` | PD, LGD, EAD, Expected Loss, SHAP risk drivers for one borrower |
 | `GET` | `/market/portfolios/{id}/risk` | Volatility, VaR (95/99%), Expected Shortfall, drawdown, concentration |
 | `POST` | `/stress/portfolios/{id}/run` | Runs a shock scenario, persists the result |
-| `POST` | `/agent/ask` | Natural-language question → agent-orchestrated, tool-grounded answer |
+| `POST` | `/agent/ask` | Natural-language question → agent-orchestrated, tool-grounded answer with execution trace (shows which tools were called and their status) |
 
 ## Getting Started
 
