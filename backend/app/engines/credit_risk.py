@@ -15,6 +15,7 @@ class CreditAssessment:
     status: str
     model_version: str
     risk_drivers: list[str]
+    decline_threshold: float
 
 
 def assess_borrower(borrower: Borrower, loan: Loan | None = None, explain: bool = False) -> CreditAssessment:
@@ -42,4 +43,5 @@ def assess_borrower(borrower: Borrower, loan: Loan | None = None, explain: bool 
         status=prediction.get("status", "UNKNOWN"),
         model_version=prediction.get("model_version", "unknown"),
         risk_drivers=prediction.get("risk_drivers", []),
+        decline_threshold=settings.credit_decline_threshold,
     )

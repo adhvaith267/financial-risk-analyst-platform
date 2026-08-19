@@ -14,8 +14,18 @@ ALB_NAME=fra-backend-alb
 
 aws_() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 
+# CloudFront (08_setup_cloudfront.sh) fronts the ALB with HTTPS - the
+# Amplify frontend is HTTPS by default, so calling the plain-HTTP ALB
+# directly is blocked by the browser as mixed content.
 ALB_DNS=$(aws_ elbv2 describe-load-balancers --names "$ALB_NAME" --query 'LoadBalancers[0].DNSName' --output text)
-echo "backend ALB: $ALB_DNS"
+CF_DOMAIN=$(aws_ cloudfront list-distributions \
+  --query "DistributionList.Items[?Origins.Items[0].DomainName=='$ALB_DNS'].DomainName | [0]" --output text)
+if [ "$CF_DOMAIN" = "None" ] || [ -z "$CF_DOMAIN" ]; then
+  echo "No CloudFront distribution found in front of $ALB_NAME - run 08_setup_cloudfront.sh first" >&2
+  exit 1
+fi
+API_BASE_URL="https://$CF_DOMAIN"
+echo "backend API base URL (via CloudFront): $API_BASE_URL"
 
 APP_ID=$(aws_ amplify list-apps --query "apps[?name=='$APP_NAME'].appId | [0]" --output text)
 if [ "$APP_ID" = "None" ] || [ -z "$APP_ID" ]; then
@@ -43,12 +53,12 @@ if [ "$APP_ID" = "None" ] || [ -z "$APP_ID" ]; then
     --tags project=financial-risk-analyst \
     --query 'app.appId' --output text)
   aws_ amplify create-branch --app-id "$APP_ID" --branch-name "$BRANCH" \
-    --environment-variables VITE_API_BASE_URL="http://$ALB_DNS" \
+    --environment-variables VITE_API_BASE_URL="$API_BASE_URL" \
     --enable-auto-build
   echo "created Amplify app $APP_ID"
 else
   aws_ amplify update-branch --app-id "$APP_ID" --branch-name "$BRANCH" \
-    --environment-variables VITE_API_BASE_URL="http://$ALB_DNS" >/dev/null
+    --environment-variables VITE_API_BASE_URL="$API_BASE_URL" >/dev/null
   echo "using existing Amplify app $APP_ID"
 fi
 

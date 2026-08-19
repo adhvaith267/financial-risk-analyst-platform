@@ -136,6 +136,12 @@
       "Resource": "*"
     },
     {
+      "Sid": "CloudFront",
+      "Effect": "Allow",
+      "Action": "cloudfront:*",
+      "Resource": "*"
+    },
+    {
       "Sid": "PassExistingRoles",
       "Effect": "Allow",
       "Action": ["iam:PassRole", "iam:GetRole"],

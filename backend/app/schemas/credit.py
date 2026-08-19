@@ -10,3 +10,4 @@ class CreditAssessmentResponse(BaseModel):
     status: str
     model_version: str
     risk_drivers: list[str]
+    decline_threshold: float

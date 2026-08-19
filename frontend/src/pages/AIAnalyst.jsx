@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import api from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
+import MarkdownText from '../components/MarkdownText.jsx'
 
 const examples = [
   'Assess borrower B1001 and explain the major factors driving the risk.',
@@ -34,11 +36,10 @@ export default function AIAnalyst() {
 
   return (
     <div className="analyst-page">
-      <h1>AI Analyst</h1>
-      <p className="subtitle">
-        Ask in plain language. The agent decides which tools to call - it never invents a PD, VaR,
-        or loss figure itself.
-      </p>
+      <PageHeader
+        title="AI Analyst"
+        subtitle="Ask in plain language. The agent decides which tools to call - it never invents a PD, VaR, or loss figure itself."
+      />
 
       {messages.length === 0 && (
         <div className="examples">
@@ -56,7 +57,11 @@ export default function AIAnalyst() {
             <div className="chat-role">
               {m.role === 'user' ? 'You' : m.role === 'agent' ? 'Risk Analyst Agent' : 'Error'}
             </div>
-            <div className="chat-text">{m.text}</div>
+            {m.role === 'agent' ? (
+              <MarkdownText text={m.text} />
+            ) : (
+              <div className="chat-text">{m.text}</div>
+            )}
           </div>
         ))}
         {loading && (

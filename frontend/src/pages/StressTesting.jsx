@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import api from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import Stat from '../components/Stat.jsx'
+import Dumbbell from '../components/Dumbbell.jsx'
+import BarRow from '../components/BarRow.jsx'
 import { formatCurrency, formatPercent } from '../format.js'
 
 export default function StressTesting() {
@@ -35,11 +38,10 @@ export default function StressTesting() {
 
   return (
     <div>
-      <h1>Stress Testing</h1>
-      <p className="subtitle">
-        Apply an equity/rate/default shock to a portfolio and the active loan book: market loss +
-        credit loss = combined loss.
-      </p>
+      <PageHeader
+        title="Stress Testing"
+        subtitle="Apply an equity/rate/default shock to a portfolio and the active loan book: market loss + credit loss = combined loss."
+      />
 
       <form className="stress-form" onSubmit={run}>
         <label>
@@ -83,15 +85,35 @@ export default function StressTesting() {
 
       {result && (
         <div className="result-block">
-          <div className="meta-row">
-            {formatCurrency(result.baseline_portfolio_value)} →{' '}
-            {formatCurrency(result.stressed_portfolio_value)}
-          </div>
-
           <div className="stat-grid">
             <Stat label="Market Loss" value={formatCurrency(result.market_loss)} />
             <Stat label="Credit Loss" value={formatCurrency(result.credit_loss)} />
             <Stat label="Combined Loss" value={formatCurrency(result.combined_loss)} tone="warn" />
+          </div>
+
+          <div className="card">
+            <h3>Portfolio Value: Baseline vs Stressed</h3>
+            <Dumbbell
+              rows={[
+                {
+                  label: result.portfolio_id,
+                  baseline: result.baseline_portfolio_value,
+                  stressed: result.stressed_portfolio_value,
+                },
+              ]}
+              formatValue={formatCurrency}
+            />
+          </div>
+
+          <div className="card">
+            <h3>Loss Breakdown</h3>
+            <BarRow
+              items={[
+                { label: 'Market', value: result.market_loss, color: 'var(--series-1)' },
+                { label: 'Credit', value: result.credit_loss, color: 'var(--series-2)' },
+              ]}
+              formatValue={formatCurrency}
+            />
           </div>
 
           <div className="meta-row">

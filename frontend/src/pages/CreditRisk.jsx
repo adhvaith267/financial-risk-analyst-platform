@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import api from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import Stat from '../components/Stat.jsx'
+import Meter from '../components/Meter.jsx'
 import { formatCurrency, formatPercent } from '../format.js'
 
 export default function CreditRisk() {
@@ -28,11 +30,10 @@ export default function CreditRisk() {
 
   return (
     <div>
-      <h1>Credit Risk</h1>
-      <p className="subtitle">
-        Probability of Default from the GMSC SageMaker model, combined with deterministic LGD/EAD
-        logic: Expected Loss = PD x LGD x EAD.
-      </p>
+      <PageHeader
+        title="Credit Risk"
+        subtitle="Probability of Default from the GMSC SageMaker model, combined with deterministic LGD/EAD logic: Expected Loss = PD x LGD x EAD."
+      />
 
       <form className="inline-form" onSubmit={assess}>
         <input
@@ -57,8 +58,18 @@ export default function CreditRisk() {
             {result.status}
           </div>
 
+          <div className="card">
+            <h3>Probability of Default</h3>
+            <Meter
+              value={result.pd}
+              max={Math.max(result.decline_threshold * 2.5, result.pd * 1.1)}
+              threshold={result.decline_threshold}
+              valueLabel={formatPercent(result.pd)}
+              thresholdLabel={`decline threshold: ${formatPercent(result.decline_threshold)}`}
+            />
+          </div>
+
           <div className="stat-grid">
-            <Stat label="Probability of Default" value={formatPercent(result.pd)} />
             <Stat label="LGD" value={formatPercent(result.lgd)} />
             <Stat label="EAD" value={formatCurrency(result.ead)} />
             <Stat label="Expected Loss" value={formatCurrency(result.expected_loss)} tone="warn" />

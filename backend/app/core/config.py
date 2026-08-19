@@ -21,6 +21,18 @@ class Settings(BaseSettings):
     # doesn't specify its own recovery_rate.
     default_recovery_rate: float = 0.60
 
+    # Mirrors the SageMaker endpoint's own RISK_THRESHOLD default (see the
+    # financial-risk-analyst-ml repo's inference.py) - exposed here purely so
+    # the API can report it back to callers rather than have them hardcode it.
+    credit_decline_threshold: float = 0.10
+
+    # Comma-separated browser origins allowed to call this API (CORS).
+    allowed_origins: str = "http://localhost:5173"
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
     @property
     def database_url(self) -> str:
         return (

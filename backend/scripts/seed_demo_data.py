@@ -8,7 +8,7 @@ data API. Borrower credit attributes are real GMSC rows, not synthetic.
 """
 
 import io
-from datetime import date, timedelta
+from datetime import date
 
 import boto3
 import numpy as np

@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import api from '../api.js'
+import PageHeader from '../components/PageHeader.jsx'
 import Stat from '../components/Stat.jsx'
+import BarRow from '../components/BarRow.jsx'
 import { formatCurrency, formatPercent } from '../format.js'
+
+const SERIES_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)']
 
 export default function MarketRisk() {
   const [portfolioId, setPortfolioId] = useState('P001')
@@ -24,12 +28,22 @@ export default function MarketRisk() {
     }
   }
 
+  const weightItems = result
+    ? Object.entries(result.weights)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([asset, weight], i) => ({
+          label: asset,
+          value: weight,
+          color: SERIES_COLORS[i % SERIES_COLORS.length],
+        }))
+    : []
+
   return (
     <div>
-      <h1>Market Risk</h1>
-      <p className="subtitle">
-        Historical-simulation risk: today's portfolio weights applied to historical daily returns.
-      </p>
+      <PageHeader
+        title="Market Risk"
+        subtitle="Historical-simulation risk: today's portfolio weights applied to historical daily returns."
+      />
 
       <form className="inline-form" onSubmit={assess}>
         <input
@@ -63,22 +77,7 @@ export default function MarketRisk() {
 
           <div className="card">
             <h3>Portfolio Weights</h3>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Weight</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(result.weights).map(([asset, weight]) => (
-                  <tr key={asset}>
-                    <td>{asset}</td>
-                    <td>{formatPercent(weight)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <BarRow items={weightItems} formatValue={formatPercent} />
           </div>
         </div>
       )}

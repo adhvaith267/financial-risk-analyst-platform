@@ -1,153 +1,296 @@
 # Financial Risk Analyst Platform
 
-AI-powered financial risk analyst for financial organizations. Combines a
-deterministic Credit Risk Engine (PD via SageMaker + LGD/EAD/EL logic), a
-Market Risk Engine, a Stress Testing Engine, a LangGraph agent on Amazon
-Bedrock, and a React analyst UI.
+AI-powered financial risk analyst for financial organizations — an agentic
+platform that combines deterministic quantitative finance, a trained credit
+risk model, and an LLM agent on Amazon Bedrock to answer questions like
+*"Assess borrower B102"* or *"What happens to portfolio P001 in a
+recession?"* with a single, explained, numbers-first answer.
 
-The PD (Probability of Default) model itself lives in a separate sibling
-repo, [`financial-risk-analyst-ml`](../financial-risk-analyst-ml), and is
-served from a SageMaker real-time endpoint (`gmsc-pd-endpoint`). This repo
-consumes that endpoint; it never re-implements or approximates PD.
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![pgvector](https://img.shields.io/badge/pgvector-RAG-4169E1)](https://github.com/pgvector/pgvector)
+[![LangGraph](https://img.shields.io/badge/LangGraph-agent-1C3C3C)](https://www.langchain.com/langgraph)
+[![Amazon Bedrock](https://img.shields.io/badge/Amazon%20Bedrock-LLM%20%2B%20Embeddings-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/bedrock/)
+[![Amazon SageMaker](https://img.shields.io/badge/Amazon%20SageMaker-PD%20model-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
+[![AWS ECS Fargate](https://img.shields.io/badge/AWS-ECS%20Fargate-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/fargate/)
+[![AWS Amplify](https://img.shields.io/badge/AWS-Amplify%20Hosting-232F3E?logo=awsamplify&logoColor=white)](https://aws.amazon.com/amplify/)
+[![Docker](https://img.shields.io/badge/Docker-container-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 
-## Live
+**Live:** [Frontend](https://master.d97yoeq2bkvvs.amplifyapp.com) ·
+[Backend API](https://d18srlraorwzfk.cloudfront.net) ·
+[PD Model repo (`financial-risk-analyst-ml`)](https://github.com/adhvaith267/credit-default-pd-model)
 
-- Frontend: https://master.d97yoeq2bkvvs.amplifyapp.com
-- Backend API: http://fra-backend-alb-2126259273.ap-south-1.elb.amazonaws.com
-  (HTTP only, no custom domain yet - see Phase 9 in `docs/PHASES.md`)
+---
 
-Not yet visually verified in an actual browser (no browser automation tool
-was available when this was deployed) - do a manual click-through before
-relying on the frontend as fully validated.
+## Summary
 
-## Layout
+Most "AI finance" demos let a language model estimate a risk number directly
+— which means the number is only as trustworthy as the model's guess. This
+platform takes the opposite position: **the LLM never computes a risk
+figure.** Every PD, LGD, Expected Loss, VaR, Expected Shortfall, or
+stress-test loss in this system comes from a trained model or a deterministic
+financial formula. The agent's only job is to decide *which* of those tools
+to call for a given question, and then explain the result in plain language.
 
 ```
-backend/    FastAPI app: core config/db, SQLAlchemy models, Alembic
-            migrations, credit/market/stress engines, LangGraph agent,
-            SageMaker + external-data service clients.
-frontend/   React analyst UI (dashboard, credit/market/stress views,
-            AI Analyst chat).
-infra/      AWS CLI provisioning scripts (no Terraform/CDK - plain,
-            idempotent bash + aws cli), run manually per phase.
-docs/       Architecture notes, RAG source documents.
+SageMaker predicts.  Financial engines calculate.
+LangGraph orchestrates.  Bedrock explains.
 ```
 
-## AWS account state (ap-south-1, account 575264900919)
+A borrower's Probability of Default comes from a real, calibrated
+LightGBM model trained on the GMSC dataset and served from a SageMaker
+real-time endpoint (in a [separate sibling repo](https://github.com/adhvaith267/credit-default-pd-model)).
+Expected Loss, Value-at-Risk, Expected Shortfall, and stress-test losses are
+plain Python/NumPy/pandas — no ML, fully auditable formulas. A LangGraph
+agent on Amazon Bedrock ties it together: it reads the analyst's question,
+calls the right tools (possibly several, in sequence), and writes the final
+assessment — grounded, when the question is about methodology, in a small
+RAG index of the platform's own documented assumptions.
 
-- IAM: `fra-platform-dev` user + `FRAPlatformDevPolicy`, scoped to this
-  project's services (S3 `financial-risk-analyst-*`, RDS, SageMaker,
-  Bedrock, ECS/ECR, EC2 networking, Secrets Manager `fra/*`, CloudWatch,
-  Amplify). No IAM user/policy management, Organizations, or billing access.
-  CLI profile: `fra-dev`.
-- RDS: `fra-postgres-dev`, PostgreSQL 17.10, `db.t4g.micro`, 20GB gp3,
-  **private** (not publicly accessible) - security group `fra-rds-sg`
-  allows inbound 5432 only from `fra-app-sg`, which both the ECS backend
-  and local dev (once you run `03_allow_dev_ip.sh`, see below) use.
-  Provisioned via `infra/scripts/01_provision_rds.sh`. Master password
-  lives in Secrets Manager at `fra/rds/master-password`, never in this repo.
-  For local dev machine access, temporarily flip `--publicly-accessible`
-  and run `infra/scripts/03_allow_dev_ip.sh` (whitelists your current IP
-  only); revert with
-  `aws rds modify-db-instance --db-instance-identifier fra-postgres-dev --no-publicly-accessible --profile fra-dev`
-  when done - the deployed ECS backend doesn't need this at all.
-- SageMaker: existing `FinancialRiskSageMakerExecutionRole` and trained
-  GMSC PD models from the ML repo - reused, not recreated here. The
-  real-time endpoint (`gmsc-pd-endpoint`) is deployed via that repo's
-  `scripts/deploy_sagemaker.py` and is **currently InService** (ml.m5.xlarge,
-  bills ~$0.23/hr while up - intentionally left running). Tear down with
-  `aws sagemaker delete-endpoint --endpoint-name gmsc-pd-endpoint --profile fra-dev`
-  when no longer needed.
-- Bedrock: agent uses `moonshot.kimi-k2-thinking` (see `bedrock_model_id` in
-  `app/core/config.py`). **Claude Sonnet/Opus (4.6 and 5) are blocked
-  account-wide** by an AWS Marketplace `INVALID_PAYMENT_INSTRUMENT` error -
-  confirmed via both the Converse and InvokeModel APIs, with root and
-  `fra-dev` credentials, and unaffected by accepting the model's agreement
-  (`aws bedrock create-foundation-model-agreement`, already done for all 4).
-  Fix is in AWS Console -> Billing and Cost Management -> Payment
-  preferences -> add/fix a Marketplace payment method; once that's done,
-  swap `bedrock_model_id` back to `global.anthropic.claude-opus-4-6-v1` (or
-  whichever Claude model) and it should work immediately.
+## Table of Contents
 
-## Local dev setup
+- [Architecture](#architecture)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Repository Structure](#repository-structure)
+- [Related Repository — the PD Model](#related-repository--the-pd-model)
+- [AWS Infrastructure](#aws-infrastructure)
+- [API Reference](#api-reference)
+- [Getting Started](#getting-started)
+- [Demo Data](#demo-data)
+- [Deployment](#deployment)
+- [Operating the Platform](#operating-the-platform)
+- [Project Status](#project-status)
+
+## Architecture
+
+```mermaid
+flowchart TB
+    Analyst["Risk Analyst"]
+
+    subgraph Frontend["Frontend — AWS Amplify Hosting"]
+        SPA["React SPA<br/>Dashboard · Credit · Market · Stress · AI Analyst"]
+    end
+
+    CF["Amazon CloudFront<br/>(HTTPS edge in front of the ALB)"]
+    ALB["Application Load Balancer"]
+
+    subgraph Backend["Backend — ECS Fargate"]
+        API["FastAPI"]
+        CreditEngine["Credit Risk Engine<br/>EL = PD x LGD x EAD"]
+        MarketEngine["Market Risk Engine<br/>Vol · VaR · ES · Drawdown · HHI"]
+        StressEngine["Stress Testing Engine<br/>Equity/Rate/Default shocks"]
+        Agent["LangGraph Risk Analyst Agent"]
+        API --> CreditEngine
+        API --> MarketEngine
+        API --> StressEngine
+        API --> Agent
+        Agent -.tool calls.-> CreditEngine
+        Agent -.tool calls.-> MarketEngine
+        Agent -.tool calls.-> StressEngine
+    end
+
+    RDS[("Amazon RDS PostgreSQL<br/>+ pgvector (RAG index)")]
+
+    subgraph MLRepo["financial-risk-analyst-ml (sibling repo)"]
+        SM["SageMaker Real-Time Endpoint<br/>Calibrated LightGBM PD model"]
+    end
+
+    subgraph Bedrock["Amazon Bedrock"]
+        LLM["Agent LLM<br/>(Kimi K2 Thinking)"]
+        Embed["Titan Embeddings<br/>(RAG retrieval)"]
+    end
+
+    Analyst --> SPA --> CF --> ALB --> API
+    CreditEngine --> SM
+    StressEngine --> SM
+    MarketEngine --> RDS
+    StressEngine --> RDS
+    Agent --> RDS
+    Agent --> LLM
+    RDS <--> Embed
+```
+
+**Why an LLM never computes a number:** SHAP-explained gradient-boosting
+models and closed-form VaR/ES formulas are auditable and reproducible;
+an LLM's arithmetic is neither. The agent's system prompt enforces this —
+every figure in its final answer must trace back to a tool call, and if a
+tool errors (unknown borrower, empty portfolio), the agent says so instead
+of guessing.
+
+## Features
+
+| Engine | What it computes | How |
+|---|---|---|
+| **Credit Risk** | PD, LGD, EAD, Expected Loss, SHAP risk drivers | PD from the SageMaker-hosted LightGBM model; `EL = PD × LGD × EAD` computed deterministically |
+| **Market Risk** | Volatility, historical & parametric VaR (95/99%), Expected Shortfall, max drawdown, concentration (HHI) | Historical simulation — today's portfolio weights applied to the portfolio's own historical daily returns |
+| **Stress Testing** | Market loss, credit loss, combined loss under an equity/rate/default shock scenario | Equity shock hits equities directly; rate shock hits bonds via a duration approximation; default shock bumps every active loan's PD and recomputes Expected Loss |
+| **AI Analyst** | A single natural-language, evidence-grounded risk assessment | LangGraph ReAct agent on Bedrock, tool-calling into the three engines plus a RAG-backed methodology search |
+| **RAG** | Answers "how is X calculated" / "what assumption do you use for Y" | pgvector similarity search over the platform's own methodology docs, embedded with Titan Embed Text v2 |
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite, React Router, Axios — plain JS, no TypeScript/Next.js |
+| Backend | FastAPI, Pydantic, SQLAlchemy 2.0, Alembic, uv |
+| Database | Amazon RDS PostgreSQL 17 + `pgvector` |
+| ML serving | Amazon SageMaker real-time endpoint (see the [ML repo](https://github.com/adhvaith267/credit-default-pd-model)) |
+| Agent | LangGraph, LangChain, Amazon Bedrock (Converse API) |
+| Embeddings | Amazon Bedrock Titan Embed Text v2 |
+| Infra | Docker, Amazon ECR, ECS Fargate, Application Load Balancer, Amazon CloudFront, AWS Amplify Hosting |
+| IAM | Scoped least-privilege IAM user/policy + task roles, no root credentials in the app path |
+
+## Repository Structure
+
+```
+backend/
+  app/
+    core/          Settings (pydantic-settings) and the DB engine/session
+    models/        SQLAlchemy models — borrowers/loans/payments,
+                   assets/portfolios/holdings, risk/stress results,
+                   RAG methodology chunks
+    engines/       credit_risk.py, market_risk.py, stress.py, retrieval.py
+                   (pure calculation, separated from DB/SageMaker I/O)
+    services/      SageMaker + Bedrock embedding clients
+    agent/         LangGraph tools + graph (the Risk Analyst Agent)
+    api/routes/    FastAPI routers — credit, market, stress, agent, dashboard
+  alembic/         Schema migrations
+  scripts/         seed_demo_data.py, ingest_rag_docs.py
+  tests/           pytest — pure-function unit tests per engine
+frontend/
+  src/
+    pages/         Dashboard, CreditRisk, MarketRisk, StressTesting, AIAnalyst
+    components/    Sidebar, Stat, Meter, BarRow, Dumbbell, MarkdownText
+docs/
+  PHASES.md        Running build log across all 9 phases
+  rag/*.md         The source documents the RAG index is built from
+infra/
+  scripts/         Idempotent AWS CLI provisioning scripts, one per phase
+                   (no Terraform/CDK by design)
+```
+
+## Related Repository — the PD Model
+
+The Probability of Default model is deliberately a **separate repository**:
+[`adhvaith267/credit-default-pd-model`](https://github.com/adhvaith267/credit-default-pd-model).
+
+- Trained on the GMSC ("Give Me Some Credit") dataset (150K samples, ~6.68%
+  default rate)
+- LightGBM in production (benchmarked against XGBoost and a Logistic
+  Regression baseline), Optuna-tuned, isotonic-calibrated (Brier score
+  0.1421 → 0.0487, a ~65.7% reduction)
+- SHAP for both global feature importance and local (per-borrower)
+  adverse-action explanations
+- Deployed to a SageMaker real-time endpoint (`gmsc-pd-endpoint`) via that
+  repo's `scripts/deploy_sagemaker.py`
+
+This platform **consumes** that endpoint through `app/services/sagemaker_client.py`
+— it never re-implements, approximates, or bypasses the model.
+
+## AWS Infrastructure
+
+Everything below runs in `ap-south-1` (Mumbai) under one AWS account, behind
+a scoped IAM user (`fra-platform-dev`) with no IAM/billing/Organizations
+access — provisioned entirely via the scripts in `infra/scripts/`, no
+console click-ops, no Terraform/CDK.
+
+| Service | Resource(s) | Purpose |
+|---|---|---|
+| **Amazon RDS** | `fra-postgres-dev` (PostgreSQL 17) | Structured data + `pgvector` RAG index. **Private** — reachable only from the app's security group, never public. |
+| **Amazon ECS (Fargate)** | `fra-cluster` / `fra-backend-svc` | Runs the FastAPI backend container, public subnets, no NAT Gateway |
+| **Elastic Load Balancing** | `fra-backend-alb` | Application Load Balancer fronting the ECS service |
+| **Amazon CloudFront** | 1 distribution | HTTPS in front of the ALB (the ALB itself is HTTP-only; CloudFront avoids needing a custom domain + ACM cert just for TLS) |
+| **Amazon ECR** | `fra-backend` | Backend Docker image registry |
+| **AWS Amplify Hosting** | `financial-risk-analyst-frontend` | Builds and serves the React frontend, connected to this repo via GitHub CI/CD |
+| **Amazon SageMaker** | `gmsc-pd-endpoint` | PD model real-time endpoint (trained/deployed from the sibling ML repo) |
+| **Amazon Bedrock** | Kimi K2 Thinking (agent LLM), Titan Embed Text v2 (RAG embeddings) | Agent reasoning/tool-use + methodology-doc retrieval |
+| **Amazon S3** | `financial-risk-analyst-adhvaith-2026` | GMSC dataset + model artifacts (shared with the ML repo), RAG source docs (`rag-docs/`) |
+| **Amazon EC2 (networking only)** | 1 VPC, 3 subnets, 3 security groups | Default VPC reused; `fra-alb-sg` → `fra-app-sg` → `fra-rds-sg` is the only path to the database — no EC2 instances actually run |
+| **Amazon CloudWatch Logs** | `/ecs/fra-backend` | ECS task stdout/stderr |
+| **AWS Secrets Manager** | `fra/rds/master-password` | RDS master password — never committed to either repo |
+| **AWS IAM** | `fra-platform-dev` user, `FRA-EcsTaskExecutionRole`, `FRA-BackendTaskRole` | One scoped dev user for all CLI provisioning + two ECS task roles, each limited to exactly what that principal needs |
+
+See `docs/PHASES.md` for the full build log, including the AWS Marketplace
+billing issue that currently blocks Claude Sonnet/Opus on Bedrock (the agent
+runs on Kimi K2 Thinking in the meantime — a one-line config swap once
+that's resolved).
+
+## API Reference
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `GET` | `/dashboard/summary` | Portfolio/borrower counts + a headline market-risk snapshot |
+| `GET` | `/credit/borrowers/{id}/assess` | PD, LGD, EAD, Expected Loss, SHAP risk drivers for one borrower |
+| `GET` | `/market/portfolios/{id}/risk` | Volatility, VaR (95/99%), Expected Shortfall, drawdown, concentration |
+| `POST` | `/stress/portfolios/{id}/run` | Runs a shock scenario, persists the result |
+| `POST` | `/agent/ask` | Natural-language question → agent-orchestrated, tool-grounded answer |
+
+## Getting Started
 
 ```bash
+# Backend
 cd backend
 uv sync
-../infra/scripts/02_write_env.sh   # after RDS status = available
-export AWS_PROFILE=fra-dev         # boto3 needs this explicitly; the SDK's
-                                    # default profile is root
-uv run alembic upgrade head        # first time: alembic revision --autogenerate -m "..."
+export AWS_PROFILE=fra-dev   # local dev only — boto3 needs this explicitly
+../infra/scripts/03_allow_dev_ip.sh                                  # whitelist your IP
+aws rds modify-db-instance --db-instance-identifier fra-postgres-dev \
+  --publicly-accessible --apply-immediately --profile fra-dev        # temporary, local dev only
+../infra/scripts/02_write_env.sh
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
+
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev   # http://localhost:5173, calls http://localhost:8000 by default
 ```
 
-## Demo data
+Revert RDS to private when done (`--no-publicly-accessible`) — the deployed
+ECS backend never needs this at all, it reaches RDS via the security-group
+path.
 
-`backend/scripts/seed_demo_data.py` (idempotent, `AWS_PROFILE=fra-dev uv run
-python scripts/seed_demo_data.py`):
+## Demo Data
 
-- 30 borrowers/loans (`B1001`..`B1030`) sampled from the real GMSC training
-  CSV in S3 (`s3://financial-risk-analyst-adhvaith-2026/datasets/gmsc/raw/cs-training.csv`,
-  fixed `random_state=42`) - real credit-bureau attributes, not synthetic.
-  Loan `outstanding_balance`/`recovery_rate` are a simple heuristic on top
-  (mortgage vs. personal, income x debt ratio), clearly synthetic.
-- Portfolio `P001` ("Demo Balanced Portfolio"): 5 assets (AAPL, MSFT, JPM,
-  TLT, CASH) with ~2 years of **synthetic** daily price history (GBM, fixed
-  seed) - a placeholder until the real-world data phase (FRED/market API).
-- Plus the one hand-seeded `B102`/`L102` from the initial smoke test.
+`backend/scripts/seed_demo_data.py` (idempotent):
 
-## RAG
+- **30 borrowers/loans** (`B1001`–`B1030`) sampled directly from the real
+  GMSC training CSV in S3, fixed random seed — real credit-bureau
+  attributes, not synthetic
+- **Portfolio `P001`**: 5 assets (AAPL, MSFT, JPM, TLT, CASH) with ~2 years
+  of **synthetic** price history (geometric Brownian motion, fixed seed) —
+  a placeholder until real market-data ingestion (FRED / a market API)
 
-Self-built on pgvector rather than managed Bedrock Knowledge Bases (see
-`docs/PHASES.md` Phase 7 for the cost tradeoff). Setup:
-
-```bash
-../infra/scripts/04_upload_rag_docs.sh    # syncs docs/rag/*.md to S3
-uv run python scripts/ingest_rag_docs.py  # chunks, embeds, upserts into methodology_chunks
-```
-
-Source docs live in `docs/rag/*.md`. Embeddings use
-`amazon.titan-embed-text-v2:0` (1024-dim). Retrieval is cosine-distance
-nearest-neighbor via pgvector's `<=>` operator (`app/engines/retrieval.py`),
-exposed to the agent as the `search_risk_methodology` tool.
+`backend/scripts/ingest_rag_docs.py` embeds `docs/rag/*.md` into the
+pgvector index.
 
 ## Deployment
 
 ```bash
-../infra/scripts/06_setup_ecs_iam.sh       # one-time: task execution + task roles
-../infra/scripts/05_deploy_backend_ecs.sh  # build, push to ECR, deploy/redeploy on Fargate behind an ALB
-../infra/scripts/07_deploy_frontend_amplify.sh  # connect/redeploy Amplify from GitHub
+infra/scripts/06_setup_ecs_iam.sh        # one-time: ECS task/execution roles
+infra/scripts/05_deploy_backend_ecs.sh   # build → ECR → ECS Fargate → ALB
+infra/scripts/07_deploy_frontend_amplify.sh   # connect/redeploy Amplify from GitHub
 ```
 
-Backend: ECR (`fra-backend`) -> ECS Fargate (`fra-cluster`/`fra-backend-svc`,
-1 task, public subnets, no NAT Gateway) -> ALB (`fra-backend-alb`, port 80).
-`FRA-EcsTaskExecutionRole` reads the DB password from Secrets Manager and
-writes logs; `FRA-BackendTaskRole` is what the running app itself uses to
-call SageMaker/Bedrock (no more `AWS_PROFILE` env var needed in production -
-that was only a local-dev workaround for boto3 defaulting to the root
-profile). Frontend: GitHub (`adhvaith267/financial-risk-analyst-platform`)
--> Amplify Hosting, `VITE_API_BASE_URL` points at the ALB.
+Pushing to `master` also auto-triggers an Amplify rebuild via its GitHub
+webhook.
 
-## Status
+## Operating the Platform
 
-- [x] Phase 0 - IAM (scoped user/policy for this project)
-- [x] Phase 1 - RDS PostgreSQL provisioned, migrated
-- [x] Data ingestion - demo borrowers/loans (real GMSC sample) + demo
-      portfolio/market prices (synthetic) seeded, see above
-- [x] Credit Risk Engine - `app/engines/credit_risk.py`, verified live end
-      to end against the deployed `gmsc-pd-endpoint`
-      (`GET /credit/borrowers/{id}/assess` returns PD/LGD/EAD/EL/risk_drivers)
-- [x] Market Risk Engine - `app/engines/market_risk.py`, verified live
-      against P001 (`GET /market/portfolios/{id}/risk`)
-- [x] Stress Testing Engine - `app/engines/stress.py`, verified live
-      (`POST /stress/portfolios/{id}/run`, persists to `stress_results`)
-- [x] LangGraph agent + Bedrock - `app/agent/`, verified live over HTTP
-      (`POST /agent/ask`) for both single-tool and multi-tool questions;
-      see the Bedrock note above re: Claude model access
-- [x] RAG - self-built on pgvector (existing RDS) instead of managed
-      Bedrock Knowledge Bases, see below
-- [x] React frontend - Dashboard, Credit/Market/Stress views, AI Analyst
-      chat; not yet visually verified in an actual browser
-- [x] AWS deployment - ECS/Fargate + ALB (backend), Amplify + GitHub CI/CD
-      (frontend), RDS reverted to private, live end-to-end (see Live above)
-- [ ] Phase 10 - security/audit pass (IAM policy review), see `docs/PHASES.md`
+Day-to-day commands — starting/stopping the backend and frontend, tearing
+down the (expensive, ~$0.23/hr) SageMaker endpoint when not in use,
+ingesting/refreshing RDS data, rotating the DB password, and a
+troubleshooting table — live in **[`docs/OPERATIONS.md`](docs/OPERATIONS.md)**.
+
+## Project Status
+
+All 9 phases from the original architecture plan are live: IAM → RDS →
+data ingestion → Credit Risk Engine → Market Risk Engine → Stress Testing
+Engine → LangGraph agent on Bedrock → RAG → React frontend → AWS deployment.
+See `docs/PHASES.md` for the detailed, chronological build log, including
+what's still open (a full IAM policy audit pass, and swapping the agent back
+to Claude once the Bedrock Marketplace billing issue is resolved).
