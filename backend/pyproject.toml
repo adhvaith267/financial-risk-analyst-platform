@@ -16,6 +16,9 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
     "scipy>=1.14",
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "langchain-aws>=0.2",
 ]
 
 [dependency-groups]

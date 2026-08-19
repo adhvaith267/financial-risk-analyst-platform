@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     db_password: str
 
     sagemaker_endpoint_name: str = "gmsc-pd-endpoint"
+    bedrock_model_id: str = "moonshot.kimi-k2-thinking"
 
     # LGD assumption for the MVP: LGD = 1 - recovery_rate, used when a loan
     # doesn't specify its own recovery_rate.

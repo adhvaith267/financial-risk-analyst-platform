@@ -48,6 +48,16 @@ docs/       Architecture notes, RAG source documents.
   bills ~$0.23/hr while up - intentionally left running). Tear down with
   `aws sagemaker delete-endpoint --endpoint-name gmsc-pd-endpoint --profile fra-dev`
   when no longer needed.
+- Bedrock: agent uses `moonshot.kimi-k2-thinking` (see `bedrock_model_id` in
+  `app/core/config.py`). **Claude Sonnet/Opus (4.6 and 5) are blocked
+  account-wide** by an AWS Marketplace `INVALID_PAYMENT_INSTRUMENT` error -
+  confirmed via both the Converse and InvokeModel APIs, with root and
+  `fra-dev` credentials, and unaffected by accepting the model's agreement
+  (`aws bedrock create-foundation-model-agreement`, already done for all 4).
+  Fix is in AWS Console -> Billing and Cost Management -> Payment
+  preferences -> add/fix a Marketplace payment method; once that's done,
+  swap `bedrock_model_id` back to `global.anthropic.claude-opus-4-6-v1` (or
+  whichever Claude model) and it should work immediately.
 
 ## Local dev setup
 
@@ -85,9 +95,13 @@ python scripts/seed_demo_data.py`):
 - [x] Credit Risk Engine - `app/engines/credit_risk.py`, verified live end
       to end against the deployed `gmsc-pd-endpoint`
       (`GET /credit/borrowers/{id}/assess` returns PD/LGD/EAD/EL/risk_drivers)
-- [ ] Market Risk Engine
-- [ ] Stress Testing Engine
-- [ ] LangGraph agent + Bedrock
+- [x] Market Risk Engine - `app/engines/market_risk.py`, verified live
+      against P001 (`GET /market/portfolios/{id}/risk`)
+- [x] Stress Testing Engine - `app/engines/stress.py`, verified live
+      (`POST /stress/portfolios/{id}/run`, persists to `stress_results`)
+- [x] LangGraph agent + Bedrock - `app/agent/`, verified live over HTTP
+      (`POST /agent/ask`) for both single-tool and multi-tool questions;
+      see the Bedrock note above re: Claude model access
 - [ ] RAG (S3 + Bedrock Knowledge Bases)
 - [ ] React frontend
 - [ ] AWS deployment (ECS/Fargate, Amplify)

@@ -35,9 +35,28 @@ design doc, just a running checklist.
       loans, one round trip) = combined $77,624
 
 ## Phase 6 — LangGraph agent + Bedrock
-- [ ] Tool wrappers around the 3 engines + DB lookups
-- [ ] LangGraph graph wiring tool selection -> engine calls -> Bedrock synthesis
-- [ ] `POST /agent/ask`
+- [x] Tool wrappers around the 3 engines + DB lookups (`app/agent/tools.py`):
+      get_borrower, get_portfolio, assess_credit_risk, assess_market_risk,
+      run_stress_scenario - each opens its own short-lived DB session
+      (LangGraph runs tool calls concurrently across threads; a shared
+      Session isn't thread-safe)
+- [x] LangGraph ReAct agent (`app/agent/graph.py`) wiring tool selection ->
+      engine calls -> Bedrock synthesis, with a system prompt that forbids
+      the model from computing PD/LGD/VaR/etc. itself
+- [x] `POST /agent/ask`, verified live over HTTP for both single-tool
+      (credit) and multi-tool (market + stress) questions
+- [x] Model: **Bedrock access audit** - Claude Sonnet/Opus 4.6 and 5 are
+      blocked account-wide by an AWS Marketplace `INVALID_PAYMENT_INSTRUMENT`
+      error (confirmed via Converse *and* InvokeModel, root and fra-dev,
+      unaffected by accepting the model agreement - needs a payment method
+      fix in Billing Console, user's call to make). Swept the full model
+      catalog; landed on **moonshot.kimi-k2-thinking** (natively hosted, no
+      billing blocker, built for agentic tool-use). Config is one line
+      (`bedrock_model_id` in `app/core/config.py`) to swap later.
+- [x] Fixed a `<think>...</think>` reasoning-leak bug in the final answer
+      (Kimi inlines chain-of-thought as literal tags sometimes without a
+      closing tag, and Converse content can be a string or a list of
+      blocks depending on the model) - `_extract_text()` handles both
 
 ## Phase 7 — RAG (S3 + Bedrock Knowledge Bases)
 - [ ] Needs an AWS decision on vector store backend (OpenSearch Serverless has
