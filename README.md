@@ -1,3 +1,5 @@
+<div align="center">
+
 # Financial Risk Analyst Platform
 
 AI-powered financial risk analyst for financial organizations — an agentic
@@ -22,6 +24,8 @@ recession?"* with a single, explained, numbers-first answer.
 **Live:** [Frontend](https://master.d97yoeq2bkvvs.amplifyapp.com) ·
 [Backend API](https://d18srlraorwzfk.cloudfront.net) ·
 [PD Model repo (`financial-risk-analyst-ml`)](https://github.com/adhvaith267/credit-default-pd-model)
+
+</div>
 
 ---
 
@@ -63,7 +67,6 @@ RAG index of the platform's own documented assumptions.
 - [Demo Data](#demo-data)
 - [Deployment](#deployment)
 - [Operating the Platform](#operating-the-platform)
-- [Project Status](#project-status)
 
 ## Architecture
 
@@ -135,7 +138,7 @@ of guessing.
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, Vite, React Router, Axios — plain JS, no TypeScript/Next.js |
+| Frontend | React 18, Vite, React Router, Axios |
 | Backend | FastAPI, Pydantic, SQLAlchemy 2.0, Alembic, uv |
 | Database | Amazon RDS PostgreSQL 17 + `pgvector` |
 | ML serving | Amazon SageMaker real-time endpoint (see the [ML repo](https://github.com/adhvaith267/credit-default-pd-model)) |
@@ -147,30 +150,61 @@ of guessing.
 ## Repository Structure
 
 ```
-backend/
-  app/
-    core/          Settings (pydantic-settings) and the DB engine/session
-    models/        SQLAlchemy models — borrowers/loans/payments,
-                   assets/portfolios/holdings, risk/stress results,
-                   RAG methodology chunks
-    engines/       credit_risk.py, market_risk.py, stress.py, retrieval.py
-                   (pure calculation, separated from DB/SageMaker I/O)
-    services/      SageMaker + Bedrock embedding clients
-    agent/         LangGraph tools + graph (the Risk Analyst Agent)
-    api/routes/    FastAPI routers — credit, market, stress, agent, dashboard
-  alembic/         Schema migrations
-  scripts/         seed_demo_data.py, ingest_rag_docs.py
-  tests/           pytest — pure-function unit tests per engine
-frontend/
-  src/
-    pages/         Dashboard, CreditRisk, MarketRisk, StressTesting, AIAnalyst
-    components/    Sidebar, Stat, Meter, BarRow, Dumbbell, MarkdownText
-docs/
-  PHASES.md        Running build log across all 9 phases
-  rag/*.md         The source documents the RAG index is built from
-infra/
-  scripts/         Idempotent AWS CLI provisioning scripts, one per phase
-                   (no Terraform/CDK by design)
+.
+├── backend/
+│   ├── app/
+│   │   ├── agent/                 LangGraph tools + graph — the Risk Analyst Agent
+│   │   │   ├── graph.py
+│   │   │   └── tools.py
+│   │   ├── api/routes/            FastAPI routers
+│   │   │   ├── credit.py
+│   │   │   ├── market.py
+│   │   │   ├── stress.py
+│   │   │   ├── agent.py
+│   │   │   └── dashboard.py
+│   │   ├── core/                  Settings (pydantic-settings) + DB engine/session
+│   │   │   ├── config.py
+│   │   │   └── db.py
+│   │   ├── engines/                Pure calculation, separated from DB/SageMaker I/O
+│   │   │   ├── credit_risk.py
+│   │   │   ├── market_risk.py
+│   │   │   ├── stress.py
+│   │   │   └── retrieval.py
+│   │   ├── models/                SQLAlchemy models
+│   │   │   ├── borrower.py         borrowers, loans, payments
+│   │   │   ├── market.py           assets, portfolios, holdings, prices
+│   │   │   ├── risk.py             risk_results, stress_results
+│   │   │   └── rag.py              RAG methodology chunks
+│   │   ├── schemas/                Pydantic request/response models
+│   │   ├── services/               SageMaker + Bedrock embedding clients
+│   │   └── main.py
+│   ├── alembic/                    Schema migrations
+│   ├── scripts/
+│   │   ├── seed_demo_data.py      Seeds borrowers/loans/portfolio
+│   │   └── ingest_rag_docs.py     Chunks + embeds docs/rag/*.md into pgvector
+│   ├── tests/                      pytest — pure-function unit tests per engine
+│   └── Dockerfile
+│
+├── frontend/
+│   └── src/
+│       ├── pages/                  Dashboard, CreditRisk, MarketRisk, StressTesting, AIAnalyst
+│       ├── components/             Sidebar, Stat, Meter, BarRow, Dumbbell, MarkdownText
+│       ├── api.js                  Axios client
+│       └── format.js               Currency/percent formatting helpers
+│
+├── docs/
+│   ├── OPERATIONS.md               Start/stop, data ingestion, troubleshooting
+│   ├── PHASES.md                   Chronological build log
+│   └── rag/*.md                    Source documents the RAG index is built from
+│
+└── infra/
+    ├── scripts/                    Idempotent AWS CLI provisioning, one script per phase
+    │   ├── 01_provision_rds.sh
+    │   ├── 05_deploy_backend_ecs.sh
+    │   ├── 07_deploy_frontend_amplify.sh
+    │   ├── 08_setup_cloudfront.sh
+    │   └── ...
+    └── fra-dev-iam-policy.json     The scoped IAM policy, kept in sync with what's deployed
 ```
 
 ## Related Repository — the PD Model
@@ -285,12 +319,3 @@ Day-to-day commands — starting/stopping the backend and frontend, tearing
 down the (expensive, ~$0.23/hr) SageMaker endpoint when not in use,
 ingesting/refreshing RDS data, rotating the DB password, and a
 troubleshooting table — live in **[`docs/OPERATIONS.md`](docs/OPERATIONS.md)**.
-
-## Project Status
-
-All 9 phases from the original architecture plan are live: IAM → RDS →
-data ingestion → Credit Risk Engine → Market Risk Engine → Stress Testing
-Engine → LangGraph agent on Bedrock → RAG → React frontend → AWS deployment.
-See `docs/PHASES.md` for the detailed, chronological build log, including
-what's still open (a full IAM policy audit pass, and swapping the agent back
-to Claude once the Bedrock Marketplace billing issue is resolved).
