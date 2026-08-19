@@ -58,11 +58,27 @@ design doc, just a running checklist.
       closing tag, and Converse content can be a string or a list of
       blocks depending on the model) - `_extract_text()` handles both
 
-## Phase 7 — RAG (S3 + Bedrock Knowledge Bases)
-- [ ] Needs an AWS decision on vector store backend (OpenSearch Serverless has
-      an hourly cost even idle) - will ask before provisioning
-- [ ] Seed methodology/assumptions docs, ingest into KB
-- [ ] Wire retrieval into the agent
+## Phase 7 — RAG
+- [x] AWS decision made: skipped managed Bedrock Knowledge Bases (its
+      vector store backends - OpenSearch Serverless, Aurora PGv2, etc -
+      all mean a new billed resource with a real cost floor even idle).
+      Self-built RAG instead: pgvector extension enabled on the existing
+      free-tier RDS instance, near-zero incremental cost.
+- [x] 4 methodology docs written (`docs/rag/*.md`, grounded in what's
+      actually implemented, not generic filler) covering credit risk
+      (EL/PD/LGD/EAD), market risk (VaR/ES/vol/drawdown/concentration),
+      stress testing methodology, and model/data assumptions - synced to
+      S3 via `infra/scripts/04_upload_rag_docs.sh`
+- [x] `backend/scripts/ingest_rag_docs.py`: section-level chunking (17
+      chunks from 4 docs), embedded via `amazon.titan-embed-text-v2:0`
+      (1024-dim, natively hosted, no Marketplace issue), upserted into a
+      new `methodology_chunks` table (idempotent per source file)
+- [x] `app/engines/retrieval.py`: cosine-distance search via pgvector's
+      `<=>` operator; verified live - top hit for "How is expected
+      shortfall calculated?" was the correct ES section (distance 0.40)
+- [x] Wired as agent tool `search_risk_methodology`; verified live that
+      the agent grounds methodology answers in retrieved passages rather
+      than answering from the model's own training data
 
 ## Phase 8 — React frontend
 - [ ] Dashboard, Credit/Market/Stress views, AI Analyst chat

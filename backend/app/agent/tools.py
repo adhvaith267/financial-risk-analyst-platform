@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_engine
 from app.engines.credit_risk import assess_borrower
 from app.engines.market_risk import assess_portfolio
+from app.engines.retrieval import search_methodology
 from app.engines.stress import StressScenario, run_stress_test
 from app.models.borrower import Borrower, Loan
 from app.models.market import Portfolio, PortfolioHolding
@@ -149,10 +150,30 @@ def build_tools() -> list[StructuredTool]:
             }
             return _json(payload)
 
+    def search_risk_methodology(query: str) -> str:
+        """Search the firm's risk methodology and assumptions documentation
+        (credit risk formulas, market risk formulas, stress testing
+        methodology, model/data assumptions) for passages relevant to
+        `query`. Use this when the analyst asks a "what/how/why" definitional
+        question (e.g. "how is expected shortfall calculated", "what
+        recovery rate do you assume") rather than a specific borrower or
+        portfolio question."""
+        with Session(get_engine()) as db:
+            results = search_methodology(db, query)
+            return _json(
+                {
+                    "results": [
+                        {"source": r.source, "title": r.title, "content": r.content}
+                        for r in results
+                    ]
+                }
+            )
+
     return [
         StructuredTool.from_function(func=get_borrower, name="get_borrower"),
         StructuredTool.from_function(func=get_portfolio, name="get_portfolio"),
         StructuredTool.from_function(func=assess_credit_risk, name="assess_credit_risk"),
         StructuredTool.from_function(func=assess_market_risk, name="assess_market_risk"),
         StructuredTool.from_function(func=run_stress_scenario, name="run_stress_scenario"),
+        StructuredTool.from_function(func=search_risk_methodology, name="search_risk_methodology"),
     ]

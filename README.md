@@ -86,6 +86,21 @@ python scripts/seed_demo_data.py`):
   seed) - a placeholder until the real-world data phase (FRED/market API).
 - Plus the one hand-seeded `B102`/`L102` from the initial smoke test.
 
+## RAG
+
+Self-built on pgvector rather than managed Bedrock Knowledge Bases (see
+`docs/PHASES.md` Phase 7 for the cost tradeoff). Setup:
+
+```bash
+../infra/scripts/04_upload_rag_docs.sh    # syncs docs/rag/*.md to S3
+uv run python scripts/ingest_rag_docs.py  # chunks, embeds, upserts into methodology_chunks
+```
+
+Source docs live in `docs/rag/*.md`. Embeddings use
+`amazon.titan-embed-text-v2:0` (1024-dim). Retrieval is cosine-distance
+nearest-neighbor via pgvector's `<=>` operator (`app/engines/retrieval.py`),
+exposed to the agent as the `search_risk_methodology` tool.
+
 ## Status
 
 - [x] Phase 0 - IAM (scoped user/policy for this project)
@@ -102,6 +117,7 @@ python scripts/seed_demo_data.py`):
 - [x] LangGraph agent + Bedrock - `app/agent/`, verified live over HTTP
       (`POST /agent/ask`) for both single-tool and multi-tool questions;
       see the Bedrock note above re: Claude model access
-- [ ] RAG (S3 + Bedrock Knowledge Bases)
+- [x] RAG - self-built on pgvector (existing RDS) instead of managed
+      Bedrock Knowledge Bases, see below
 - [ ] React frontend
 - [ ] AWS deployment (ECS/Fargate, Amplify)
