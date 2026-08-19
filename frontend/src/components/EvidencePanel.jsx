@@ -4,7 +4,6 @@ const TOOL_LABELS = {
   assess_credit_risk: 'Credit Risk Engine — SageMaker PD model + deterministic LGD/EAD/EL',
   assess_market_risk: 'Market Risk Engine — historical simulation',
   run_stress_scenario: 'Stress Testing Engine',
-  search_risk_methodology: 'Risk methodology index (RAG over documented assumptions)',
 }
 
 export default function EvidencePanel({ trace }) {
