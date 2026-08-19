@@ -57,20 +57,26 @@ aws_ ecs describe-clusters --clusters $CLUSTER --query 'clusters[0].status' --ou
   aws_ ecs create-cluster --cluster-name $CLUSTER --tags key=project,value=financial-risk-analyst >/dev/null
 
 echo "== register task definition =="
-aws_ ecs register-task-definition --cli-input-json file://"$(dirname "$0")/task-def.json" --query 'taskDefinition.revision' --output text
+NEW_REVISION=$(aws_ ecs register-task-definition --cli-input-json file://"$(dirname "$0")/task-def.json" --query 'taskDefinition.revision' --output text)
+echo "registered fra-backend:$NEW_REVISION"
 
 echo "== service =="
 if aws_ ecs describe-services --cluster $CLUSTER --services $SERVICE --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
-  aws_ ecs update-service --cluster $CLUSTER --service $SERVICE --force-new-deployment >/dev/null
-  echo "service updated, forcing redeploy"
+  # IMPORTANT: a service created with an unqualified family name stays pinned
+  # to whichever revision existed at create time - --force-new-deployment
+  # alone just restarts THAT SAME revision. --task-definition must be passed
+  # explicitly on every deploy or code/config changes silently never go live.
+  aws_ ecs update-service --cluster $CLUSTER --service $SERVICE \
+    --task-definition "fra-backend:$NEW_REVISION" --force-new-deployment >/dev/null
+  echo "service updated to fra-backend:$NEW_REVISION, forcing redeploy"
 else
   SUBNETS_CSV=$(echo "$SUBNET_IDS" | tr ' ' ',')
-  aws_ ecs create-service --cluster $CLUSTER --service-name $SERVICE --task-definition fra-backend \
+  aws_ ecs create-service --cluster $CLUSTER --service-name $SERVICE --task-definition "fra-backend:$NEW_REVISION" \
     --desired-count 1 --launch-type FARGATE \
     --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS_CSV],securityGroups=[$APP_SG_ID],assignPublicIp=ENABLED}" \
     --load-balancers "targetGroupArn=$TG_ARN,containerName=fra-backend,containerPort=8000" \
     --tags key=project,value=financial-risk-analyst >/dev/null
-  echo "service created"
+  echo "service created on fra-backend:$NEW_REVISION"
 fi
 
 aws_ ecs wait services-stable --cluster $CLUSTER --services $SERVICE

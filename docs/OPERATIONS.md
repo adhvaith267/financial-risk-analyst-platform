@@ -167,7 +167,7 @@ infra/scripts/05_deploy_backend_ecs.sh
 
 | Symptom | Likely cause | Check |
 |---|---|---|
-| Frontend shows "Network Error" | Mixed content (frontend HTTPS calling an HTTP API) or CORS | Confirm `VITE_API_BASE_URL` points at the CloudFront domain, not the raw ALB; confirm the frontend's origin is in `ALLOWED_ORIGINS` on the backend |
+| Frontend shows "Network Error" | Mixed content (frontend HTTPS calling an HTTP API), CORS, **or the ECS service silently still running an old task-definition revision** | Confirm `VITE_API_BASE_URL` points at the CloudFront domain, not the raw ALB; confirm the frontend's origin is in `ALLOWED_ORIGINS`; check the actual running revision with `aws ecs describe-tasks ... --query 'tasks[0].taskDefinitionArn'` against `aws ecs describe-task-definition --task-definition fra-backend --query taskDefinition.revision` - if they don't match, `update-service --force-new-deployment` alone does **not** pick up new revisions (it just restarts whatever revision the service is already pinned to); `05_deploy_backend_ecs.sh` now passes `--task-definition` explicitly every deploy to prevent this |
 | `500` on `/credit/...` or `/agent/ask` | SageMaker endpoint not `InService` | `aws sagemaker describe-endpoint --endpoint-name gmsc-pd-endpoint` |
 | Backend can't reach RDS | RDS is private and the caller isn't in `fra-app-sg` | ECS tasks are always in `fra-app-sg`, so this usually means local dev without `03_allow_dev_ip.sh` |
 | ECS task stuck `PENDING`/failing to start | Check task stopped-reason | `aws ecs describe-tasks --cluster fra-cluster --tasks <task-id>` |
