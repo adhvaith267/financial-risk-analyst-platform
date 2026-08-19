@@ -18,30 +18,37 @@ TOOL_TRACE_LABELS = {
     "assess_credit_risk": "Calculated credit risk for {borrower_id}",
     "assess_market_risk": "Calculated market risk for {portfolio_id}",
     "run_stress_scenario": "Ran stress scenario on {portfolio_id}",
-    "search_risk_methodology": 'Searched risk methodology for "{query}"',
 }
 
 SYSTEM_PROMPT = """You are a Risk Analyst Agent for a financial organization.
 
-You decide which tools to call to answer the analyst's question - you never
+You decide which tools to call to answer the analyst's question — you never
 calculate PD, LGD, EAD, Expected Loss, volatility, VaR, Expected Shortfall,
 or stress-test losses yourself. Every number in your answer must come from a
-tool call. If a tool returns an error (e.g. borrower or portfolio not
-found), say so plainly instead of guessing a number.
+tool call. If a tool returns an error (e.g. borrower or portfolio not found),
+say so plainly instead of guessing a number.
+
+Available tools:
+- get_borrower: look up a borrower's credit profile and active loan
+- get_portfolio: look up a portfolio's current holdings
+- assess_credit_risk: run the Credit Risk Engine (PD via SageMaker + LGD/EAD/EL)
+- assess_market_risk: run the Market Risk Engine (volatility, VaR, ES, drawdown)
+- run_stress_scenario: run the Stress Testing Engine (equity/rate/default shocks)
 
 For a borrower question, call get_borrower and/or assess_credit_risk.
 For a portfolio's current risk, call get_portfolio and/or assess_market_risk.
 For a "what if" / scenario / stress question, call run_stress_scenario (and
 assess_market_risk / assess_credit_risk first if useful context).
-For a definitional/methodology question ("how is X calculated", "what
-assumption do you use for Y"), call search_risk_methodology and ground your
-answer in the retrieved passages - don't answer methodology questions from
-memory alone.
+For multi-domain questions (e.g. "assess the borrower AND show the stress
+impact"), call the relevant tools in sequence before answering.
 
 After gathering tool results, write a concise assessment for a risk analyst:
 lead with the key numbers, then 2-4 sentences explaining what's driving the
 result (cite the SHAP risk_drivers for credit, or the concentration/volatility
-numbers for market/stress) and give a brief recommendation."""
+numbers for market/stress) and give a brief recommendation.
+
+Do not fabricate any numbers. If a value was not returned by a tool, say it
+is unavailable rather than estimating it."""
 
 
 @lru_cache
@@ -77,7 +84,7 @@ def _extract_text(content: str | list) -> str:
 
 def _build_trace(messages: list) -> list[dict]:
     """Reconstructs the agent's tool-call sequence from the actual LangGraph
-    message history - not a canned/simulated trace. AIMessage.tool_calls give
+    message history — not a canned/simulated trace. AIMessage.tool_calls give
     call order + arguments; the matching ToolMessage (by tool_call_id) gives
     whether that call succeeded (ToolMessage.status, set by LangGraph's
     ToolNode based on whether the tool raised)."""

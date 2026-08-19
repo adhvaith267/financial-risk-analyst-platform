@@ -9,7 +9,7 @@ const examples = [
   'Assess borrower B1001 and explain the major factors driving the risk.',
   'What is the current market risk of portfolio P001?',
   'What happens to P001 if we hit a recession?',
-  'How is Expected Shortfall calculated?',
+  'Assess borrower B1005 and show the impact of a 25% equity market decline.',
 ]
 
 export default function AIAnalyst() {

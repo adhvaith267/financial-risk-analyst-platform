@@ -18,9 +18,9 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# methodology_chunks removed from this list — RAG pipeline deleted.
 TABLES_AND_COLUMNS = [
     ("borrowers", "created_at"),
-    ("methodology_chunks", "created_at"),
     ("risk_results", "computed_at"),
     ("stress_results", "computed_at"),
 ]

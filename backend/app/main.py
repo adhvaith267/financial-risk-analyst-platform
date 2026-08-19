@@ -8,7 +8,7 @@ from app.api.routes.market import router as market_router
 from app.api.routes.stress import router as stress_router
 from app.core.config import get_settings
 
-app = FastAPI(title="Financial Risk Analyst API")
+app = FastAPI(title="Financial Risk Analyst API", root_path="/api")
 
 app.add_middleware(
     CORSMiddleware,

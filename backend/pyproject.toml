@@ -19,7 +19,6 @@ dependencies = [
     "langgraph>=0.2",
     "langchain-core>=0.3",
     "langchain-aws>=0.2",
-    "pgvector>=0.5.0",
 ]
 
 [dependency-groups]

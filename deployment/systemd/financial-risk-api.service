@@ -1,0 +1,24 @@
+[Unit]
+Description=Financial Risk Analyst API (FastAPI/Uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/var/www/financial-risk-analyst/backend
+# Load runtime environment variables from this file (never commit real secrets).
+EnvironmentFile=/etc/financial-risk-analyst/env
+ExecStart=/var/www/financial-risk-analyst/backend/.venv/bin/uvicorn \
+    app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=financial-risk-api
+
+[Install]
+WantedBy=multi-user.target
