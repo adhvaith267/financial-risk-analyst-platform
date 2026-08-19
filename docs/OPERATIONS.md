@@ -1,145 +1,144 @@
 # Operations Guide
 
-Day-to-day commands for running, stopping, and maintaining the deployed
-platform. All commands assume the `fra-dev` AWS CLI profile
-(`--profile fra-dev`) and region `ap-south-1`; every resource name below is
-literal (this project's actual resources), not a placeholder.
+Day-to-day commands for running and maintaining the platform.
+All AWS CLI commands use `--profile fra-dev --region ap-south-1`.
 
-## Costs at a glance — what's actually billing right now
+---
 
-| Resource | Bills while... | Approx cost |
+## Current infrastructure at a glance
+
+| Resource | Type | Status |
 |---|---|---|
-| RDS (`fra-postgres-dev`, `db.t4g.micro`) | Always (until stopped/deleted) | Free-tier eligible / low single-digit $/mo |
-| ECS Fargate (1 task, 0.25 vCPU/0.5GB) | Always the service is running | A few $/mo |
-| ALB | Always it exists | ~$16-20/mo fixed + traffic |
-| CloudFront | Always it exists | Pennies at this traffic level |
-| SageMaker endpoint (`ml.m5.xlarge`) | **Always it's InService** | **~$0.23/hr (~$5.50/day)** — the single biggest lever |
-| Amplify Hosting | Build minutes + bandwidth only | Pennies at this traffic level |
-| Bedrock / embeddings | Per-request only | Pennies per question asked |
+| `fra-app-server` | EC2 t3.small (AL2023) | Running — hosts Nginx + FastAPI + React |
+| `fra-postgres-dev` | RDS PostgreSQL 17, db.t4g.micro | Always-on |
+| `gmsc-pd-endpoint` | SageMaker real-time endpoint | InService — biggest cost lever |
+| Bedrock `moonshot.kimi-k2-thinking` | Per-request | No standing cost |
 
-**If you want to stop spending without deleting anything**, stop the
-SageMaker endpoint and the ECS service (both below) — RDS, ALB, and
-CloudFront are cheap enough to leave running, but can also be stopped/torn
-down if you want zero cost.
+## Cost levers
 
-## Starting and stopping the backend (ECS Fargate)
+| Resource | Approx cost | Stop to save |
+|---|---|---|
+| EC2 t3.small | ~$15/mo | `aws ec2 stop-instances` |
+| RDS db.t4g.micro | Free-tier / low single-digit $/mo | `aws rds stop-db-instance` |
+| SageMaker `ml.m5.xlarge` endpoint | **~$0.23/hr (~$5.50/day)** | Delete endpoint (see below) |
+| Bedrock | Per request — pennies | N/A |
 
-The backend is one ECS service running one task behind an ALB.
+**Cheapest "pause" state:** delete the SageMaker endpoint + stop EC2.
+RDS can stay running (free-tier eligible). Bring it back with the SageMaker
+deploy script from the ML repo + `aws ec2 start-instances`.
 
-**Stop it** (scale to zero — keeps the service/task definition, no compute
-billing while stopped):
+---
+
+## EC2 — start / stop / redeploy
+
 ```bash
-aws ecs update-service --profile fra-dev --region ap-south-1 \
-  --cluster fra-cluster --service fra-backend-svc --desired-count 0
+INSTANCE_ID=$(aws ec2 describe-instances --profile fra-dev --region ap-south-1 \
+  --filters "Name=tag:Name,Values=fra-app-server" \
+  --query 'Reservations[0].Instances[0].InstanceId' --output text)
+
+# Stop (no billing for compute while stopped, EBS still billed)
+aws ec2 stop-instances  --profile fra-dev --region ap-south-1 --instance-ids $INSTANCE_ID
+
+# Start
+aws ec2 start-instances --profile fra-dev --region ap-south-1 --instance-ids $INSTANCE_ID
+aws ec2 wait instance-running --profile fra-dev --region ap-south-1 --instance-ids $INSTANCE_ID
+
+# SSH in
+PUBLIC_IP=$(aws ec2 describe-instances --profile fra-dev --region ap-south-1 \
+  --instance-ids $INSTANCE_ID \
+  --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+ssh -i ~/.ssh/fra-dev-key.pem ec2-user@$PUBLIC_IP
 ```
 
-**Start it again:**
+### Redeploy after a code change
+
 ```bash
-aws ecs update-service --profile fra-dev --region ap-south-1 \
-  --cluster fra-cluster --service fra-backend-svc --desired-count 1
-aws ecs wait services-stable --profile fra-dev --region ap-south-1 \
-  --cluster fra-cluster --services fra-backend-svc
+ssh -i ~/.ssh/fra-dev-key.pem ec2-user@$PUBLIC_IP
+cd /var/www/financial-risk-analyst
+git pull origin simplify-aws-architecture
+cd frontend && npm ci && npm run build
+sudo systemctl restart financial-risk-api
 ```
 
-**Redeploy after a code change** (rebuilds the image, pushes to ECR,
-registers a new task revision, forces a rolling deploy):
+### Service management on EC2
+
 ```bash
-infra/scripts/05_deploy_backend_ecs.sh
+# FastAPI
+sudo systemctl status  financial-risk-api
+sudo systemctl restart financial-risk-api
+sudo journalctl -u     financial-risk-api -f     # live logs
+
+# Nginx
+sudo systemctl status  nginx
+sudo systemctl restart nginx
+sudo journalctl -u     nginx -f
+
+# Secrets / env
+sudo nano /etc/financial-risk-analyst/env        # edit env vars
+sudo systemctl restart financial-risk-api        # apply changes
 ```
 
-**Check status / recent logs:**
-```bash
-aws ecs describe-services --profile fra-dev --region ap-south-1 \
-  --cluster fra-cluster --services fra-backend-svc \
-  --query 'services[0].{Status:status,Desired:desiredCount,Running:runningCount}'
+---
 
-aws logs tail /ecs/fra-backend --profile fra-dev --region ap-south-1 --since 1h --follow
-```
+## SageMaker PD endpoint — start / stop
 
-## Starting and stopping the frontend (Amplify)
-
-Amplify Hosting is serverless static hosting — there's no "server" to
-stop/start, and it costs nothing while idle (only build minutes + bandwidth).
-To actually stop it from being reachable:
-
-**Disable auto-deploy on push** (keeps the site up, stops new commits from
-redeploying it):
-```bash
-aws amplify update-branch --profile fra-dev --region ap-south-1 \
-  --app-id d97yoeq2bkvvs --branch-name master --no-enable-auto-build
-```
-
-**Take the site down entirely** (deletes the app — irreversible, only do
-this deliberately):
-```bash
-aws amplify delete-app --profile fra-dev --region ap-south-1 --app-id d97yoeq2bkvvs
-```
-
-**Redeploy manually** (rebuild + republish the current `master` branch):
-```bash
-infra/scripts/07_deploy_frontend_amplify.sh
-```
-
-**Check the latest build:**
-```bash
-aws amplify list-jobs --profile fra-dev --region ap-south-1 \
-  --app-id d97yoeq2bkvvs --branch-name master --max-results 1
-```
-
-## Starting and stopping the PD model (SageMaker)
-
-This is the expensive one (~$0.23/hr) — stop it whenever you're not
-actively using/demoing the platform, from either repo:
-
-**Stop (delete the endpoint — the model and training jobs are untouched,
-this only removes the always-on hosting):**
+**Stop** (deletes the endpoint — model and config untouched, saves ~$0.23/hr):
 ```bash
 aws sagemaker delete-endpoint --profile fra-dev --region ap-south-1 \
   --endpoint-name gmsc-pd-endpoint
 ```
 
-**Start again** (redeploys from the latest trained model artifact, from the
-`financial-risk-analyst-ml` repo):
+**Start** (redeploy from the ML repo):
 ```bash
-cd ../financial-risk-analyst-ml
+cd ../credit-default-pd-model
 AWS_PROFILE=fra-dev uv run python scripts/deploy_sagemaker.py
-```
-Takes 3-5 minutes to reach `InService`. While the endpoint is down, the
-Credit Risk Engine and any agent question touching credit/stress will fail
-cleanly with a `ValidationError: Endpoint ... not found` — the rest of the
-platform (Market Risk, RAG methodology questions) keeps working.
-
-## Ingesting / refreshing data in RDS
-
-All scripts run from `backend/`, with `AWS_PROFILE=fra-dev` set. If RDS is
-currently private (the normal state) and you're running from a laptop
-rather than from inside the VPC, first:
-```bash
-../infra/scripts/03_allow_dev_ip.sh
-aws rds modify-db-instance --profile fra-dev --db-instance-identifier fra-postgres-dev \
-  --publicly-accessible --apply-immediately
-# ... run the scripts below ...
-aws rds modify-db-instance --profile fra-dev --db-instance-identifier fra-postgres-dev \
-  --no-publicly-accessible --apply-immediately   # revert when done
+# Takes 3–5 minutes to reach InService
 ```
 
-**Apply schema changes** (after editing a SQLAlchemy model):
+**Check status:**
 ```bash
-uv run alembic revision --autogenerate -m "describe the change"
+aws sagemaker describe-endpoint --profile fra-dev --region ap-south-1 \
+  --endpoint-name gmsc-pd-endpoint \
+  --query '{Status:EndpointStatus,Updated:LastModifiedTime}'
+```
+
+> While the endpoint is down, any credit-risk or stress-test call will
+> return a clear error. Market risk and the dashboard still work.
+
+---
+
+## RDS — stop / start
+
+```bash
+# Stop (saves compute cost; storage still billed; auto-starts after 7 days)
+aws rds stop-db-instance --profile fra-dev --region ap-south-1 \
+  --db-instance-identifier fra-postgres-dev
+
+# Start
+aws rds start-db-instance --profile fra-dev --region ap-south-1 \
+  --db-instance-identifier fra-postgres-dev
+aws rds wait db-instance-available --profile fra-dev --region ap-south-1 \
+  --db-instance-identifier fra-postgres-dev
+```
+
+---
+
+## Database — migrations and seeding
+
+Run from your laptop (allow your IP first via `infra/scripts/03_allow_dev_ip.sh`
+and set `DB_HOST`/`DB_PASSWORD` in `backend/.env`), or SSH into EC2 and run there.
+
+```bash
+cd backend
+
+# Apply schema changes
 uv run alembic upgrade head
-```
 
-**Re-seed demo borrowers/loans/portfolio** (idempotent — re-running refreshes
-the data, doesn't duplicate it):
-```bash
+# Re-seed demo data (idempotent)
 uv run python scripts/seed_demo_data.py
 ```
 
-**Re-ingest RAG methodology docs** (after editing `docs/rag/*.md`):
-```bash
-../infra/scripts/04_upload_rag_docs.sh   # sync docs/rag/*.md to S3
-uv run python scripts/ingest_rag_docs.py # re-chunk, re-embed, re-upsert
-```
+---
 
 ## Rotating the RDS password
 
@@ -148,27 +147,36 @@ NEW_PW=$(python3 -c "import secrets,string; print(''.join(secrets.choice(string.
 aws secretsmanager put-secret-value --profile fra-dev --region ap-south-1 \
   --secret-id fra/rds/master-password --secret-string "$NEW_PW"
 aws rds modify-db-instance --profile fra-dev --region ap-south-1 \
-  --db-instance-identifier fra-postgres-dev --master-user-password "$NEW_PW" --apply-immediately
+  --db-instance-identifier fra-postgres-dev \
+  --master-user-password "$NEW_PW" --apply-immediately
+
+# Update the env file on EC2
+ssh -i ~/.ssh/fra-dev-key.pem ec2-user@$PUBLIC_IP \
+  "sudo sed -i 's/^DB_PASSWORD=.*/DB_PASSWORD=$NEW_PW/' /etc/financial-risk-analyst/env && \
+   sudo systemctl restart financial-risk-api"
 ```
-ECS reads the secret fresh on every task start (via the `secrets` block in
-the task definition), so the next `05_deploy_backend_ecs.sh` picks it up
-automatically — no code change needed.
 
-## Swapping the agent's model
+---
 
-Blocked Claude models aside, changing which Bedrock model powers the agent
-is a one-line change:
+## Swapping the Bedrock model
+
 ```bash
-# edit infra/scripts/task-def.json: BEDROCK_MODEL_ID -> the new model id
-infra/scripts/05_deploy_backend_ecs.sh
+# On EC2:
+sudo sed -i 's/^BEDROCK_MODEL_ID=.*/BEDROCK_MODEL_ID=<new-model-id>/' \
+  /etc/financial-risk-analyst/env
+sudo systemctl restart financial-risk-api
 ```
+
+---
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Check |
-|---|---|---|
-| Frontend shows "Network Error" | Mixed content (frontend HTTPS calling an HTTP API), CORS, **or the ECS service silently still running an old task-definition revision** | Confirm `VITE_API_BASE_URL` points at the CloudFront domain, not the raw ALB; confirm the frontend's origin is in `ALLOWED_ORIGINS`; check the actual running revision with `aws ecs describe-tasks ... --query 'tasks[0].taskDefinitionArn'` against `aws ecs describe-task-definition --task-definition fra-backend --query taskDefinition.revision` - if they don't match, `update-service --force-new-deployment` alone does **not** pick up new revisions (it just restarts whatever revision the service is already pinned to); `05_deploy_backend_ecs.sh` now passes `--task-definition` explicitly every deploy to prevent this |
-| `500` on `/credit/...` or `/agent/ask` | SageMaker endpoint not `InService` | `aws sagemaker describe-endpoint --endpoint-name gmsc-pd-endpoint` |
-| Backend can't reach RDS | RDS is private and the caller isn't in `fra-app-sg` | ECS tasks are always in `fra-app-sg`, so this usually means local dev without `03_allow_dev_ip.sh` |
-| ECS task stuck `PENDING`/failing to start | Check task stopped-reason | `aws ecs describe-tasks --cluster fra-cluster --tasks <task-id>` |
-| Bedrock `AccessDeniedException` | Model not enabled for the account, or (for Marketplace-fulfilled models) a payment-instrument issue | See `docs/PHASES.md` Phase 6 |
+| Symptom | Check |
+|---|---|
+| FastAPI won't start | `journalctl -u financial-risk-api -n 50` |
+| Nginx 502 | `systemctl status financial-risk-api` — is it running on port 8000? |
+| DB connection refused | RDS SG allows 5432 from `fra-app-sg`? `DB_HOST` correct in `/etc/financial-risk-analyst/env`? |
+| SageMaker `AccessDenied` | EC2 has `FRA-EC2Role` attached? Role has `sagemaker:InvokeEndpoint`? |
+| Bedrock `AccessDenied` | Role has `bedrock:InvokeModel`? Model ID correct? Model enabled in Bedrock console? |
+| Agent returns no answer | `journalctl -u financial-risk-api -n 100` — look for tool errors |
+| Credit/stress 500 after restart | SageMaker endpoint `InService`? `aws sagemaker describe-endpoint --endpoint-name gmsc-pd-endpoint` |
