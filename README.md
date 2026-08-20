@@ -24,45 +24,95 @@ with a single, explained, numbers-first answer.
 ## Architecture
 
 ```
-User
- │
- ▼
-React SPA
- │  served by Nginx on EC2
- ▼
-Nginx  (port 80)
- │  /api/* → strips prefix → proxies to FastAPI
- ▼
-FastAPI  (127.0.0.1:8000, not public)
- │
- ▼
-LangGraph ReAct Agent
- │  thinks, selects tools, calls them in sequence, observes results
- │
- ├──► Credit Risk Tool
- │       ├── RDS PostgreSQL  (borrower + loan data)
- │       └── SageMaker Endpoint  (LightGBM PD model)
- │               └── PD → LGD / EAD / Expected Loss
- │
- ├──► Market Risk Tool
- │       └── RDS PostgreSQL  (portfolio, holdings, price history)
- │               └── VaR / ES / volatility / drawdown / HHI
- │
- └──► Stress Testing Tool
-         └── RDS PostgreSQL  (portfolio + active loans)
-                 └── equity shock / rate shock / default shock
- │
- ▼  collected tool results
-Amazon Bedrock  (Kimi K2 Thinking — Converse API)
- │  synthesises tool outputs into plain-language risk analysis
- ▼
-FastAPI → Nginx → React → Analyst
+                              ┌─────────────────────────────────────────────────────┐
+                              │                    AWS EC2  (t3.small)               │
+                              │                                                       │
+   ┌──────────┐   HTTP :80    │  ┌─────────────────────────────────────────────────┐ │
+   │          │ ────────────► │  │                    Nginx                         │ │
+   │  Analyst │               │  │  /          → React SPA  (dist/index.html)       │ │
+   │ (Browser)│ ◄──────────── │  │  /api/*     → FastAPI  (strips /api prefix)      │ │
+   └──────────┘               │  └────────────────────┬────────────────────────────┘ │
+                              │                        │  127.0.0.1:8000             │
+                              │            ┌───────────▼───────────────┐             │
+                              │            │         FastAPI            │             │
+                              │            │    /credit  /market        │             │
+                              │            │    /stress  /agent         │             │
+                              │            └───────────┬───────────────┘             │
+                              │                        │                             │
+                              │            ┌───────────▼───────────────┐             │
+                              │            │   LangGraph ReAct Agent    │             │
+                              │            │                            │             │
+                              │            │  thinks → picks tool(s)   │             │
+                              │            │  calls → observes result  │             │
+                              │            │  repeats until done       │             │
+                              │            └──────┬──────────┬─────────┘             │
+                              │                   │          │         │             │
+                              └───────────────────┼──────────┼─────────┼─────────────┘
+                                                  │          │         │
+               ┌──────────────────────────────────┘          │         └──────────────────────────────┐
+               │                                             │                                        │
+   ┌───────────▼─────────────────┐            ┌─────────────▼──────────────┐          ┌──────────────▼────────────────┐
+   │     Credit Risk Tool        │            │    Market Risk Tool         │          │    Stress Testing Tool        │
+   │                             │            │                             │          │                               │
+   │  1. fetch borrower + loan   │            │  1. fetch portfolio         │          │  1. fetch portfolio + loans   │
+   │  2. build SageMaker payload │            │     holdings + prices       │          │  2. apply equity shock        │
+   │  3. call SageMaker endpoint │            │  2. compute returns         │          │  3. apply rate shock          │
+   │  4. PD  ──────────────────► │            │  3. VaR / ES / vol          │          │  4. apply default shock       │
+   │  5. LGD = 1 − recovery_rate │            │  4. drawdown / HHI          │          │  5. market loss +             │
+   │  6. EAD = balance           │            │                             │          │     credit loss →             │
+   │  7. EL  = PD × LGD × EAD   │            │                             │          │     combined loss             │
+   └──────────┬──────────────────┘            └──────────────┬─────────────┘          └────────────────┬──────────────┘
+              │                                              │                                          │
+              │          ┌───────────────────────────────────┘                                          │
+              │          │                                        ┌─────────────────────────────────────┘
+              │          │                                        │
+   ┌──────────▼──────────▼────────────────────────────────────────▼──────────────┐
+   │                           RDS PostgreSQL  (fra-postgres-dev)                  │
+   │                                                                               │
+   │   borrowers · loans · portfolios · portfolio_holdings · assets                │
+   │   market_prices · payments · risk_results · stress_results                   │
+   └───────────────────────────────────────────────────────────────────────────────┘
+
+              │          │                                        │
+              └──────────┴────────────┬───────────────────────────┘
+                                      │  structured tool results
+                          ┌───────────▼───────────────┐
+                          │                            │
+                          │   Amazon Bedrock LLM       │
+                          │   Kimi K2 Thinking         │
+                          │   (Converse API)           │
+                          │                            │
+                          │  • reads tool outputs      │
+                          │  • never invents numbers   │
+                          │  • explains in plain       │
+                          │    language for analysts   │
+                          └───────────┬───────────────┘
+                                      │  natural-language answer
+                                      ▼
+                              FastAPI → Nginx → Browser
+
+   ┌──────────────────────────────────────────────────┐
+   │              AWS SageMaker                        │
+   │         gmsc-pd-endpoint  (ml.m5.xlarge)          │
+   │                                                   │
+   │   LightGBM PD model  (isotonic-calibrated)        │
+   │   Input : 10 GMSC credit features                 │
+   │   Output: { pd, status, risk_drivers (SHAP) }     │
+   └──────────────────────────────────────────────────┘
+         ▲  called only by Credit Risk Tool
+
+   ┌──────────────────────────────────────────────────┐
+   │              AWS S3  (ML lifecycle only)          │
+   │  raw/         GMSC raw dataset                    │
+   │  processed/   feature-engineered training data    │
+   │  artifacts/   model.tar.gz  (SageMaker reads)     │
+   └──────────────────────────────────────────────────┘
 ```
 
-**Key principle:** the LLM never computes a risk number. Every PD, LGD, EAD,
-Expected Loss, VaR, Expected Shortfall, or stress-test loss comes from a
-deterministic engine or the SageMaker model. The agent selects tools and
-synthesises results — it does not invent figures.
+> **Key principle:** the LLM never computes a risk number. Every PD, LGD, EAD,
+> Expected Loss, VaR, Expected Shortfall, or stress-test loss comes from a
+> deterministic engine or the SageMaker model. The agent selects tools and
+> synthesises results — it does not invent figures.
 
 ---
 
