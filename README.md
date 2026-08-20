@@ -16,8 +16,6 @@ Riskora brings credit risk, portfolio market risk, stress testing, and tool-grou
 [![Amazon SageMaker](https://img.shields.io/badge/Amazon%20SageMaker-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-**Live → [riskora.online](https://riskora.online)**
-
 </div>
 
 ---
