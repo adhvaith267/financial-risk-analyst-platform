@@ -89,24 +89,6 @@
       }
     },
     {
-      "Sid": "SecretsManagerProject",
-      "Effect": "Allow",
-      "Action": "secretsmanager:*",
-      "Resource": "arn:aws:secretsmanager:ap-south-1:575264900919:secret:fra/*"
-    },
-    {
-      "Sid": "Observability",
-      "Effect": "Allow",
-      "Action": [
-        "cloudwatch:*",
-        "logs:*"
-      ],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": { "aws:RequestedRegion": "ap-south-1" }
-      }
-    },
-    {
       "Sid": "PassExistingRoles",
       "Effect": "Allow",
       "Action": ["iam:PassRole", "iam:GetRole"],

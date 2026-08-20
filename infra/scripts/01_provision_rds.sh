@@ -17,14 +17,13 @@ DB_MASTER_USER=fra_admin
 DB_INSTANCE_CLASS=db.t4g.micro
 DB_ENGINE_VERSION=17.10
 DB_STORAGE_GB=20
-SECRET_NAME=fra/rds/master-password
 
 aws_() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 
 echo "== Security group: $APP_SG_NAME =="
 APP_SG_ID=$(aws_ ec2 describe-security-groups --filters Name=group-name,Values=$APP_SG_NAME Name=vpc-id,Values=$VPC_ID --query 'SecurityGroups[0].GroupId' --output text)
 if [ "$APP_SG_ID" = "None" ] || [ -z "$APP_SG_ID" ]; then
-  APP_SG_ID=$(aws_ ec2 create-security-group --group-name $APP_SG_NAME --description "FRA platform app/ECS tasks" --vpc-id $VPC_ID --query 'GroupId' --output text)
+  APP_SG_ID=$(aws_ ec2 create-security-group --group-name $APP_SG_NAME --description "FRA platform app server" --vpc-id $VPC_ID --query 'GroupId' --output text)
   aws_ ec2 create-tags --resources "$APP_SG_ID" --tags Key=Name,Value=$APP_SG_NAME Key=project,Value=financial-risk-analyst
 fi
 echo "app SG: $APP_SG_ID"
@@ -48,15 +47,7 @@ if ! aws_ rds describe-db-subnet-groups --db-subnet-group-name $DB_SUBNET_GROUP 
 fi
 echo "subnet group ready"
 
-echo "== Master password secret: $SECRET_NAME =="
-if ! aws_ secretsmanager describe-secret --secret-id "$SECRET_NAME" >/dev/null 2>&1; then
-  MASTER_PW=$(python3 -c "import secrets,string; alphabet=string.ascii_letters+string.digits; print(''.join(secrets.choice(alphabet) for _ in range(32)))")
-  aws_ secretsmanager create-secret --name "$SECRET_NAME" --description "FRA RDS master password" \
-    --secret-string "$MASTER_PW" --tags Key=project,Value=financial-risk-analyst >/dev/null
-else
-  MASTER_PW=$(aws_ secretsmanager get-secret-value --secret-id "$SECRET_NAME" --query SecretString --output text)
-fi
-echo "secret ready"
+MASTER_PW=$(python3 -c "import secrets,string; alphabet=string.ascii_letters+string.digits; print(''.join(secrets.choice(alphabet) for _ in range(32)))")
 
 echo "== RDS instance: $DB_INSTANCE_ID =="
 if aws_ rds describe-db-instances --db-instance-identifier $DB_INSTANCE_ID >/dev/null 2>&1; then
@@ -86,3 +77,9 @@ fi
 echo "== Waiting summary =="
 aws_ rds describe-db-instances --db-instance-identifier $DB_INSTANCE_ID \
   --query 'DBInstances[0].{Status:DBInstanceStatus,Endpoint:Endpoint.Address,Port:Endpoint.Port}' --output json
+
+echo ""
+echo "================================================================"
+echo "DB master password (save this — it is not stored anywhere else):"
+echo "$MASTER_PW"
+echo "================================================================"

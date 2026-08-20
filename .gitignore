@@ -1,3 +1,6 @@
+# Private — never push
+PRIVATE_OPS.md
+
 __pycache__/
 *.pyc
 .venv/

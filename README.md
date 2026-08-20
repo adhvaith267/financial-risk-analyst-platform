@@ -1,12 +1,9 @@
 <div align="center">
 
-# Financial Risk Analyst Platform
+# Riskora
 
-AI-powered financial risk analyst — an agentic platform that combines
-deterministic quantitative finance, a trained credit risk model, and a
-LangGraph ReAct agent on Amazon Bedrock to answer questions like
-*"Assess borrower B1001"* or *"What happens to P001 in a recession?"*
-with a single, explained, numbers-first answer.
+**AI-powered financial risk analyst platform.**
+Ask a question in plain English — get a numbers-first answer backed by a trained ML model, deterministic quant engines, and an LLM that only synthesises, never invents.
 
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -15,117 +12,67 @@ with a single, explained, numbers-first answer.
 [![Amazon Bedrock](https://img.shields.io/badge/Amazon%20Bedrock-Kimi%20K2-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/bedrock/)
 [![Amazon SageMaker](https://img.shields.io/badge/SageMaker-LightGBM%20PD-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![EC2](https://img.shields.io/badge/AWS-EC2-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/ec2/)
+
+**Live → [riskora.online](https://riskora.online)**
 
 </div>
+
+---
+
+## What it does
+
+Riskora combines three risk engines with a LangGraph ReAct agent on Amazon Bedrock to answer questions like *"Assess borrower B1001"* or *"What happens to portfolio P001 in a recession?"*
+
+| Engine | What it computes |
+|---|---|
+| **Credit Risk** | PD (via SageMaker LightGBM), LGD, EAD, Expected Loss + SHAP drivers |
+| **Market Risk** | Historical-simulation VaR, Expected Shortfall, volatility, drawdown, HHI |
+| **Stress Testing** | Combined equity + rate + default shock across portfolio and loan book |
+
+The LLM reads tool outputs and explains them in plain language. It never computes a number itself.
 
 ---
 
 ## Architecture
 
 ```
-                              ┌─────────────────────────────────────────────────────┐
-                              │                    AWS EC2  (t3.small)               │
-                              │                                                       │
-   ┌──────────┐   HTTP :80    │  ┌─────────────────────────────────────────────────┐ │
-   │          │ ────────────► │  │                    Nginx                         │ │
-   │  Analyst │               │  │  /          → React SPA  (dist/index.html)       │ │
-   │ (Browser)│ ◄──────────── │  │  /api/*     → FastAPI  (strips /api prefix)      │ │
-   └──────────┘               │  └────────────────────┬────────────────────────────┘ │
-                              │                        │  127.0.0.1:8000             │
-                              │            ┌───────────▼───────────────┐             │
-                              │            │         FastAPI            │             │
-                              │            │    /credit  /market        │             │
-                              │            │    /stress  /agent         │             │
-                              │            └───────────┬───────────────┘             │
-                              │                        │                             │
-                              │            ┌───────────▼───────────────┐             │
-                              │            │   LangGraph ReAct Agent    │             │
-                              │            │                            │             │
-                              │            │  thinks → picks tool(s)   │             │
-                              │            │  calls → observes result  │             │
-                              │            │  repeats until done       │             │
-                              │            └──────┬──────────┬─────────┘             │
-                              │                   │          │         │             │
-                              └───────────────────┼──────────┼─────────┼─────────────┘
-                                                  │          │         │
-               ┌──────────────────────────────────┘          │         └──────────────────────────────┐
-               │                                             │                                        │
-   ┌───────────▼─────────────────┐            ┌─────────────▼──────────────┐          ┌──────────────▼────────────────┐
-   │     Credit Risk Tool        │            │    Market Risk Tool         │          │    Stress Testing Tool        │
-   │                             │            │                             │          │                               │
-   │  1. fetch borrower + loan   │            │  1. fetch portfolio         │          │  1. fetch portfolio + loans   │
-   │  2. build SageMaker payload │            │     holdings + prices       │          │  2. apply equity shock        │
-   │  3. call SageMaker endpoint │            │  2. compute returns         │          │  3. apply rate shock          │
-   │  4. PD  ──────────────────► │            │  3. VaR / ES / vol          │          │  4. apply default shock       │
-   │  5. LGD = 1 − recovery_rate │            │  4. drawdown / HHI          │          │  5. market loss +             │
-   │  6. EAD = balance           │            │                             │          │     credit loss →             │
-   │  7. EL  = PD × LGD × EAD   │            │                             │          │     combined loss             │
-   └──────────┬──────────────────┘            └──────────────┬─────────────┘          └────────────────┬──────────────┘
-              │                                              │                                          │
-              │          ┌───────────────────────────────────┘                                          │
-              │          │                                        ┌─────────────────────────────────────┘
-              │          │                                        │
-   ┌──────────▼──────────▼────────────────────────────────────────▼──────────────┐
-   │                           RDS PostgreSQL  (fra-postgres-dev)                  │
-   │                                                                               │
-   │   borrowers · loans · portfolios · portfolio_holdings · assets                │
-   │   market_prices · payments · risk_results · stress_results                   │
-   └───────────────────────────────────────────────────────────────────────────────┘
-
-              │          │                                        │
-              └──────────┴────────────┬───────────────────────────┘
-                                      │  structured tool results
-                          ┌───────────▼───────────────┐
-                          │                            │
-                          │   Amazon Bedrock LLM       │
-                          │   Kimi K2 Thinking         │
-                          │   (Converse API)           │
-                          │                            │
-                          │  • reads tool outputs      │
-                          │  • never invents numbers   │
-                          │  • explains in plain       │
-                          │    language for analysts   │
-                          └───────────┬───────────────┘
-                                      │  natural-language answer
-                                      ▼
-                              FastAPI → Nginx → Browser
-
-   ┌──────────────────────────────────────────────────┐
-   │              AWS SageMaker                        │
-   │         gmsc-pd-endpoint  (ml.m5.xlarge)          │
-   │                                                   │
-   │   LightGBM PD model  (isotonic-calibrated)        │
-   │   Input : 10 GMSC credit features                 │
-   │   Output: { pd, status, risk_drivers (SHAP) }     │
-   └──────────────────────────────────────────────────┘
-         ▲  called only by Credit Risk Tool
-
-   ┌──────────────────────────────────────────────────┐
-   │              AWS S3  (ML lifecycle only)          │
-   │  raw/         GMSC raw dataset                    │
-   │  processed/   feature-engineered training data    │
-   │  artifacts/   model.tar.gz  (SageMaker reads)     │
-   └──────────────────────────────────────────────────┘
+  Browser
+    │  HTTPS
+    ▼
+  Nginx  (EC2 t3.small)
+    ├── /          → React SPA
+    └── /api/*     → FastAPI :8000
+                        │
+                   LangGraph ReAct Agent
+                        │
+          ┌─────────────┼──────────────┐
+          ▼             ▼              ▼
+    Credit Risk    Market Risk    Stress Test
+    Engine         Engine         Engine
+          │             │              │
+          └─────────────┴──────────────┘
+                        │
+                   RDS PostgreSQL
+                   (borrowers, loans, portfolios,
+                    market_prices, risk_results …)
+          │
+          ▼
+    SageMaker Endpoint          Amazon Bedrock
+    LightGBM PD model           Kimi K2 Thinking
+    (real-time inference)       (synthesis only)
 ```
-
-> **Key principle:** the LLM never computes a risk number. Every PD, LGD, EAD,
-> Expected Loss, VaR, Expected Shortfall, or stress-test loss comes from a
-> deterministic engine or the SageMaker model. The agent selects tools and
-> synthesises results — it does not invent figures.
 
 ---
 
 ## AWS Services
 
-| Service | Resource | Purpose |
-|---------|----------|---------|
-| **EC2** | `fra-app-server` (t3.small, Amazon Linux 2023) | Runs Nginx + FastAPI + React build |
-| **RDS PostgreSQL** | `fra-postgres-dev` (db.t4g.micro, PG 17) | All structured application data |
-| **SageMaker** | `gmsc-pd-endpoint` (ml.m5.xlarge) | LightGBM PD model — real-time inference |
-| **Bedrock** | `moonshot.kimi-k2-thinking` | Agent LLM — final synthesis of tool results |
-| **S3** | `financial-risk-analyst-adhvaith-2026` | ML dataset + SageMaker model artifacts only |
-| **Secrets Manager** | `fra/rds/master-password` | RDS master password |
+| Service | Resource | Role |
+|---|---|---|
+| EC2 | `fra-app-server` (t3.small, AL2023) | Nginx + FastAPI + React build |
+| RDS | `fra-postgres-dev` (db.t4g.micro, PG 17) | All application data |
+| SageMaker | `gmsc-pd-endpoint` (ml.m5.xlarge) | LightGBM PD model — real-time inference |
+| Bedrock | `moonshot.kimi-k2-thinking` | Agent LLM — final answer synthesis |
+| S3 | `financial-risk-analyst-adhvaith-2026` | ML dataset + model artifacts only |
 
 ---
 
@@ -136,137 +83,125 @@ with a single, explained, numbers-first answer.
 ├── backend/
 │   ├── app/
 │   │   ├── agent/
-│   │   │   ├── graph.py        LangGraph ReAct agent + trace helpers
-│   │   │   └── tools.py        5 tools: get_borrower, get_portfolio,
-│   │   │                         assess_credit_risk, assess_market_risk,
-│   │   │                         run_stress_scenario
-│   │   ├── api/routes/         FastAPI routers (credit, market, stress, agent, dashboard)
-│   │   ├── core/               Settings (pydantic-settings) + DB engine/session
-│   │   ├── engines/            Deterministic engines: credit_risk, market_risk, stress
-│   │   ├── models/             SQLAlchemy ORM models
-│   │   ├── schemas/            Pydantic request/response schemas
-│   │   ├── services/           SageMaker boto3 client
+│   │   │   ├── graph.py          LangGraph ReAct agent
+│   │   │   └── tools.py          5 tools: get_borrower, get_portfolio,
+│   │   │                           assess_credit_risk, assess_market_risk,
+│   │   │                           run_stress_scenario
+│   │   ├── api/routes/           FastAPI routers (credit, market, stress, agent, dashboard)
+│   │   ├── core/                 Settings + DB engine/session
+│   │   ├── engines/              Credit risk, market risk, stress engines
+│   │   ├── models/               SQLAlchemy ORM models
+│   │   ├── schemas/              Pydantic request/response schemas
+│   │   ├── services/             SageMaker boto3 client
 │   │   └── main.py
-│   ├── alembic/                DB migrations
+│   ├── alembic/                  DB migrations
 │   ├── scripts/
-│   │   └── seed_demo_data.py   Seeds 30 borrowers + portfolio P001
-│   └── tests/                  pytest — pure-function unit tests (no AWS/DB required)
+│   │   └── seed_demo_data.py     Seeds 30 borrowers + portfolio P001
+│   └── tests/                    pytest unit tests (no AWS/DB required)
 │
 ├── frontend/
 │   └── src/
-│       ├── pages/              Dashboard, CreditRisk, MarketRisk, StressTesting, AIAnalyst
-│       └── components/         Sidebar, charts, AgentTrace, EvidencePanel, ...
+│       ├── pages/                Dashboard, CreditRisk, MarketRisk, StressTesting, AIAnalyst
+│       └── components/           Sidebar, charts, AgentTrace, EvidencePanel …
 │
 ├── deployment/
 │   ├── nginx/
-│   │   └── financial-risk.conf       Nginx config — SPA + /api/ reverse proxy
+│   │   └── financial-risk.conf   Nginx config (HTTPS + SPA + /api/ reverse proxy)
 │   ├── systemd/
-│   │   └── financial-risk-api.service  Uvicorn systemd unit
+│   │   └── financial-risk-api.service
 │   └── aws/
 │       ├── ec2-iam.sh            Create FRA-EC2Role + instance profile
-│       ├── ec2-provision.sh      Launch EC2 instance
-│       ├── ec2-setup.sh          Full deploy script (run on EC2)
-│       └── teardown-old-infra.sh Remove ECS/ALB/ECR/CloudFront if migrating
+│       ├── ec2-provision.sh      Provision EC2 instance
+│       └── ec2-setup.sh          Full deploy script (run on EC2)
 │
-├── infra/
-│   ├── scripts/
-│   │   ├── 01_provision_rds.sh
-│   │   ├── 02_write_env.sh
-│   │   └── 03_allow_dev_ip.sh
-│   └── fra-dev-iam-policy.json
-│
-└── docs/
-    ├── OPERATIONS.md
-    └── PHASES.md
+└── infra/
+    ├── fra-dev-iam-policy.json   IAM policy for the fra-dev user
+    └── scripts/
+        ├── 01_provision_rds.sh   Provision RDS + security groups
+        ├── 02_write_env.sh       Write /etc/financial-risk-analyst/env on EC2
+        └── 03_allow_dev_ip.sh    Whitelist dev IP for direct RDS access
 ```
-
----
-
-## Environment Variables
-
-Copy `backend/.env.example` to `backend/.env` and fill in the blanks.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AWS_REGION` | `ap-south-1` | AWS region |
-| `DB_HOST` | — | RDS endpoint hostname |
-| `DB_PORT` | `5432` | PostgreSQL port |
-| `DB_NAME` | `fra` | Database name |
-| `DB_USER` | `fra_admin` | Database user |
-| `DB_PASSWORD` | — | RDS password (fetch from Secrets Manager) |
-| `SAGEMAKER_ENDPOINT_NAME` | `gmsc-pd-endpoint` | SageMaker PD endpoint name |
-| `BEDROCK_MODEL_ID` | `moonshot.kimi-k2-thinking` | Bedrock model ID |
-| `ALLOWED_ORIGINS` | `http://localhost:5173` | CORS origins — empty string in production |
-
-> On EC2 with `FRA-EC2Role` attached, **do not** set `AWS_ACCESS_KEY_ID` /
-> `AWS_SECRET_ACCESS_KEY`. boto3 picks up the instance role automatically.
 
 ---
 
 ## Local Development
 
 ```bash
-# ── Backend ────────────────────────────────────────────────────────────────────
+# Backend
 cd backend
-uv sync                          # installs all deps into .venv
-export AWS_PROFILE=fra-dev       # boto3 uses this for SageMaker + Bedrock
-cp .env.example .env             # fill in DB_HOST and DB_PASSWORD
-# Allow your IP to reach RDS (closes automatically — see infra/scripts/03_allow_dev_ip.sh)
+uv sync
+cp .env.example .env          # fill in DB_HOST, DB_PASSWORD
+export AWS_PROFILE=fra-dev    # for SageMaker + Bedrock calls
+bash ../infra/scripts/03_allow_dev_ip.sh   # open your IP to RDS
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
-# FastAPI: http://localhost:8000
-# Swagger: http://localhost:8000/docs
+# http://localhost:8000  |  Swagger: http://localhost:8000/docs
 
-# ── Frontend ───────────────────────────────────────────────────────────────────
+# Frontend
 cd frontend
 npm install
 npm run dev
-# React dev server: http://localhost:5173
-# /api/* is proxied to http://localhost:8000 via vite.config.js
+# http://localhost:5173  (/api/* proxied to :8000 via vite.config.js)
 ```
 
 ---
 
-## Database Setup
+## Environment Variables
+
+Copy `backend/.env.example` to `backend/.env`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `AWS_REGION` | `ap-south-1` | AWS region |
+| `DB_HOST` | — | RDS endpoint |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_NAME` | `fra` | Database name |
+| `DB_USER` | `fra_admin` | Database user |
+| `DB_PASSWORD` | — | RDS master password |
+| `SAGEMAKER_ENDPOINT_NAME` | `gmsc-pd-endpoint` | SageMaker endpoint |
+| `BEDROCK_MODEL_ID` | `moonshot.kimi-k2-thinking` | Bedrock model ID |
+| `ALLOWED_ORIGINS` | `http://localhost:5173` | CORS — empty string in production |
+
+> On EC2 with `FRA-EC2Role` attached, **do not** set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`. boto3 uses the instance role automatically.
+
+---
+
+## Database
 
 ```bash
-# Run migrations (creates all tables)
+# Run migrations
 cd backend && uv run alembic upgrade head
 
-# Seed demo data — 30 borrowers/loans + portfolio P001 (~2yr price history)
+# Seed demo data (30 borrowers/loans + portfolio P001 with ~2yr price history)
 uv run python scripts/seed_demo_data.py
 ```
 
-### RDS Tables
-
 | Table | Contents |
-|-------|---------|
+|---|---|
 | `borrowers` | Credit profiles (GMSC feature set — exact SageMaker input shape) |
-| `loans` | Active/closed loans (EAD = outstanding_balance, LGD = 1 − recovery_rate) |
+| `loans` | Active/closed loans |
 | `payments` | Payment history |
 | `portfolios` | Named portfolios |
 | `portfolio_holdings` | Asset quantities per portfolio |
-| `assets` | Asset metadata (class: equity / bond / cash) |
+| `assets` | Asset metadata (equity / bond / cash) |
 | `market_prices` | Daily close prices |
-| `risk_results` | Persisted credit + market risk assessments |
+| `risk_results` | Persisted credit + market assessments |
 | `stress_results` | Persisted stress-test results |
 
 ---
 
 ## EC2 Deployment
 
-### One-time setup
-
 ```bash
-# 1. Create EC2 IAM role (needs admin credentials once)
+# 1. Create EC2 IAM role (one-time, needs admin credentials)
 bash deployment/aws/ec2-iam.sh
 
-# 2. Provision the EC2 instance
+# 2. Provision EC2 instance
 bash deployment/aws/ec2-provision.sh
 
-# 3. SSH in and run the full setup script
+# 3. SSH in and run full setup
 ssh -i ~/.ssh/fra-dev-key.pem ec2-user@<PUBLIC_IP>
-curl -fsSL https://raw.githubusercontent.com/adhvaith267/financial-risk-analyst-platform/simplify-aws-architecture/deployment/aws/ec2-setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/adhvaith267/financial-risk-analyst-platform/main/deployment/aws/ec2-setup.sh | bash
 
 # 4. Fill in secrets and restart
 sudo nano /etc/financial-risk-analyst/env
@@ -276,36 +211,11 @@ sudo systemctl restart financial-risk-api
 ### Redeploy after code changes
 
 ```bash
-ssh -i ~/.ssh/fra-dev-key.pem ec2-user@<PUBLIC_IP>
+ssh -i ~/.ssh/fra-dev-key.pem ec2-user@15.206.37.142
 cd /var/www/financial-risk-analyst
-git pull origin simplify-aws-architecture
+git pull origin main
 cd frontend && npm ci && npm run build
 sudo systemctl restart financial-risk-api
-```
-
----
-
-## Nginx Configuration
-
-File: `deployment/nginx/financial-risk.conf`
-
-| Path | Routed to |
-|------|-----------|
-| `/` | React SPA (`frontend/dist/index.html`) — SPA fallback enabled |
-| `/api/*` | `http://127.0.0.1:8000/*` — FastAPI, `/api` prefix stripped |
-
-FastAPI binds to `127.0.0.1:8000` and is **not** reachable from the internet directly.
-
----
-
-## systemd Service
-
-File: `deployment/systemd/financial-risk-api.service`
-
-```bash
-sudo systemctl status  financial-risk-api
-sudo systemctl restart financial-risk-api
-sudo journalctl -u     financial-risk-api -f    # live logs
 ```
 
 ---
@@ -313,9 +223,9 @@ sudo journalctl -u     financial-risk-api -f    # live logs
 ## API Reference
 
 | Method | Path | Description |
-|--------|------|-------------|
+|---|---|---|
 | `GET` | `/api/health` | Liveness check |
-| `GET` | `/api/dashboard/summary` | Headline KPIs, recent analyses |
+| `GET` | `/api/dashboard/summary` | Headline KPIs + recent analyses |
 | `GET` | `/api/credit/borrowers` | List all borrowers |
 | `GET` | `/api/credit/borrowers/{id}/assess` | PD / LGD / EAD / EL + SHAP drivers |
 | `GET` | `/api/market/portfolios` | List portfolios |
@@ -327,18 +237,15 @@ sudo journalctl -u     financial-risk-api -f    # live logs
 
 ## Agent Tools
 
-The LangGraph ReAct agent selects from these five tools per request:
-
 | Tool | What it does |
-|------|-------------|
-| `get_borrower` | Fetches borrower credit profile + active loan from RDS |
+|---|---|
+| `get_borrower` | Fetches borrower + active loan from RDS |
 | `get_portfolio` | Fetches portfolio holdings from RDS |
-| `assess_credit_risk` | Calls SageMaker → PD, then computes LGD / EAD / EL |
+| `assess_credit_risk` | Calls SageMaker → PD, computes LGD / EAD / EL |
 | `assess_market_risk` | Historical-simulation VaR / ES / volatility / drawdown |
 | `run_stress_scenario` | Equity + rate + default shocks across portfolio + loan book |
 
-Multi-tool example — *"Assess borrower B1001 and show the recession impact on P001"*:
-
+Example — *"Assess borrower B1001 and show the recession impact on P001"*:
 ```
 Agent → assess_credit_risk(B1001) → run_stress_scenario(P001) → Bedrock → answer
 ```
@@ -351,75 +258,34 @@ Agent → assess_credit_risk(B1001) → run_stress_scenario(P001) → Bedrock �
 cd backend
 
 # Unit tests — no AWS or DB required (28 tests)
-uv run pytest tests/test_agent.py tests/test_credit_risk.py \
-    tests/test_market_risk.py tests/test_stress.py -v
+uv run pytest tests/ -v
 
 # Import check
-uv run python -c "from app.agent.graph import ask; from app.agent.tools import build_tools; print('OK')"
+uv run python -c "from app.agent.graph import ask; print('OK')"
 
-# Frontend build
+# Frontend build check
 cd ../frontend && npm run build
 ```
 
 ---
 
-## S3 — ML Lifecycle Only
-
-S3 is used exclusively for the SageMaker ML pipeline:
-
-```
-s3://financial-risk-analyst-adhvaith-2026/
-    raw/          GMSC raw dataset
-    processed/    Feature-engineered training data
-    artifacts/    SageMaker model artifacts (model.tar.gz)
-```
-
-S3 is **not** used for application storage, reports, or document retrieval.
-
----
-
-## IAM
-
-EC2 instance role `FRA-EC2Role` grants only:
-
-- `sagemaker:InvokeEndpoint` on `gmsc-pd-endpoint`
-- `bedrock:InvokeModel` + `bedrock:InvokeModelWithResponseStream`
-
-No static credentials are stored anywhere in the application.
-
----
-
-## Troubleshooting
-
-| Symptom | Check |
-|---------|-------|
-| FastAPI won't start | `journalctl -u financial-risk-api -n 50` |
-| Nginx 502 bad gateway | `systemctl status financial-risk-api` — is it running on port 8000? |
-| DB connection refused | RDS SG allows 5432 from `fra-app-sg`? `DB_HOST` correct in `/etc/financial-risk-analyst/env`? |
-| SageMaker `AccessDenied` | EC2 has `FRA-EC2Role` attached? Role has `sagemaker:InvokeEndpoint`? |
-| Bedrock `AccessDenied` | Role has `bedrock:InvokeModel`? `BEDROCK_MODEL_ID` correct? Model enabled in Bedrock console? |
-| Agent returns no answer | `journalctl -u financial-risk-api -n 100` — look for tool call errors |
-| Credit / stress 500 | SageMaker endpoint `InService`? `aws sagemaker describe-endpoint --endpoint-name gmsc-pd-endpoint` |
-
----
-
 ## Security
 
-- FastAPI bound to `127.0.0.1:8000` — not reachable from the internet
+- FastAPI bound to `127.0.0.1:8000` — not reachable from the internet directly
 - RDS in private subnet — accessible only from `fra-app-sg`
 - EC2 uses IAM instance role — no static AWS credentials anywhere
-- `FRA-EC2Role` is least-privilege: SageMaker invoke + Bedrock invoke only
-- DB password in Secrets Manager (`fra/rds/master-password`), not in code
+- `FRA-EC2Role` is least-privilege: `sagemaker:InvokeEndpoint` + `bedrock:InvokeModel` only
+- HTTPS via Let's Encrypt (auto-renews every 90 days)
 - `/etc/financial-risk-analyst/env` — owned `root:ec2-user`, mode `640`
-- **HTTPS not configured** — add ACM + ALB or Nginx + Certbot before production use
 
 ---
 
 ## Related Repository
 
-The PD model is trained and deployed from a sibling repo:
+PD model training and deployment:
 [`adhvaith267/credit-default-pd-model`](https://github.com/adhvaith267/credit-default-pd-model)
 
-- LightGBM, Optuna-tuned, isotonic-calibrated (Brier score 0.1421 → 0.0487)
+- LightGBM, Optuna-tuned, isotonic-calibrated
+- Brier score: 0.1421 → 0.0487 after calibration
 - SHAP global + local explanations
 - Deployed to `gmsc-pd-endpoint` SageMaker real-time endpoint
