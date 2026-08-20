@@ -6,7 +6,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/adhvaith267/financial-risk-analyst-platform.git"
 APP_DIR="/var/www/financial-risk-analyst"
-DEPLOY_BRANCH="simplify-aws-architecture"
+DEPLOY_BRANCH="main"
 ENV_FILE="/etc/financial-risk-analyst/env"
 NGINX_CONF="/etc/nginx/conf.d/financial-risk.conf"
 SYSTEMD_UNIT="/etc/systemd/system/financial-risk-api.service"
