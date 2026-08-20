@@ -44,7 +44,7 @@ export default function Dumbbell({ rows, formatValue }) {
               />
             </div>
             <div className="meta-row">
-              {formatValue(row.baseline)} → {formatValue(row.stressed)}
+              Baseline vs stressed: {formatValue(row.baseline)} / {formatValue(row.stressed)}
             </div>
           </div>
         )

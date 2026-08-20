@@ -1,93 +1,11 @@
-import { useState } from 'react'
-import api from '../api.js'
-import PageHeader from '../components/PageHeader.jsx'
-import MarkdownText from '../components/MarkdownText.jsx'
-import AgentTrace from '../components/AgentTrace.jsx'
-import EvidencePanel from '../components/EvidencePanel.jsx'
-
-const examples = [
-  'Assess borrower B1001 and explain the major factors driving the risk.',
-  'What is the current market risk of portfolio P001?',
-  'What happens to P001 if we hit a recession?',
-  'Assess borrower B1005 and show the impact of a 25% equity market decline.',
-]
-
-export default function AIAnalyst() {
-  const [question, setQuestion] = useState('')
-  const [messages, setMessages] = useState([])
-  const [loading, setLoading] = useState(false)
-
-  async function send(e) {
-    e.preventDefault()
-    const q = question.trim()
-    if (!q || loading) return
-
-    setMessages((prev) => [...prev, { role: 'user', text: q }])
-    setQuestion('')
-    setLoading(true)
-    try {
-      const { data } = await api.post('/agent/ask', { question: q })
-      setMessages((prev) => [...prev, { role: 'agent', text: data.answer, trace: data.trace }])
-    } catch (err) {
-      const detail = err.response?.data?.detail || err.message
-      setMessages((prev) => [...prev, { role: 'error', text: detail }])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="analyst-page">
-      <PageHeader
-        title="AI Analyst"
-        subtitle="Ask in plain language. The agent decides which tools to call - it never invents a PD, VaR, or loss figure itself."
-      />
-
-      {messages.length === 0 && (
-        <div className="examples">
-          {examples.map((ex) => (
-            <button key={ex} className="example-chip" onClick={() => setQuestion(ex)}>
-              {ex}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="chat-log">
-        {messages.map((m, i) => (
-          <div key={i} className={`chat-message chat-${m.role}`}>
-            <div className="chat-role">
-              {m.role === 'user' ? 'You' : m.role === 'agent' ? 'Risk Analyst Agent' : 'Error'}
-            </div>
-            {m.role === 'agent' ? (
-              <>
-                <AgentTrace steps={m.trace} />
-                <MarkdownText text={m.text} />
-                <EvidencePanel trace={m.trace} />
-              </>
-            ) : (
-              <div className="chat-text">{m.text}</div>
-            )}
-          </div>
-        ))}
-        {loading && (
-          <div className="chat-message chat-agent">
-            <div className="chat-role">Risk Analyst Agent</div>
-            <div className="chat-text chat-loading">Thinking, calling tools…</div>
-          </div>
-        )}
-      </div>
-
-      <form className="chat-form" onSubmit={send}>
-        <input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask about a borrower, portfolio, or scenario..."
-        />
-        <button type="submit" disabled={loading}>
-          Analyze
-        </button>
-      </form>
-    </div>
-  )
-}
+import { useState } from "react"
+import api from "../api.js"
+import MarkdownText from "../components/MarkdownText.jsx"
+import AgentTrace from "../components/AgentTrace.jsx"
+import EvidencePanel from "../components/EvidencePanel.jsx"
+import { AgentIcon } from "../icons.jsx"
+const prompts=["Assess borrower B1001 and explain the major factors driving the risk.","What is the current market risk of portfolio P001?","What happens to P001 if we hit a recession?","Show the impact of a 25% equity market decline on B1005."]
+export default function AIAnalyst(){const [question,setQuestion]=useState(""),[messages,setMessages]=useState([]),[loading,setLoading]=useState(false)
+function newChat(){setMessages([]);setQuestion("")}
+async function send(e){e.preventDefault();const q=question.trim();if(!q||loading)return;setMessages(p=>[...p,{role:"user",text:q}]);setQuestion("");setLoading(true);try{const {data}=await api.post("/agent/ask",{question:q});setMessages(p=>[...p,{role:"agent",text:data.answer,trace:data.trace}])}catch(err){setMessages(p=>[...p,{role:"error",text:err.response?.data?.detail||err.message}])}finally{setLoading(false)}}
+return <section className="chatgpt-page"><main className="chatgpt-main"><header className="chatgpt-topbar"><div><strong>Riskora AI</strong><span>Grounded financial analysis</span></div><button className="agent-new-chat" onClick={newChat}>New chat</button></header><div className="chatgpt-scroll"><div className="chatgpt-thread">{messages.length===0?<div className="chatgpt-welcome"><div className="chatgpt-mark"><AgentIcon/></div><h1>What would you like to investigate?</h1><p>Ask about a borrower, portfolio, or scenario. Riskora will connect the answer to the relevant engine and its evidence.</p><div className="chatgpt-prompts">{prompts.map((prompt,index)=><button key={prompt} onClick={()=>setQuestion(prompt)}><span className="prompt-index">0{index+1}</span><span>{prompt}</span><b className="ui-arrow" aria-hidden="true" /></button>)}</div></div>:messages.map((message,index)=><article className={"chatgpt-message "+message.role} key={index}><div className="chatgpt-message-inner"><div className="chatgpt-message-icon">{message.role==="user"?"You":<AgentIcon/>}</div><div className="chatgpt-message-content"><div className="chatgpt-message-name">{message.role==="user"?"You":message.role==="agent"?"Riskora AI":"Error"}</div>{message.role==="agent"?<><MarkdownText text={message.text}/><AgentTrace steps={message.trace}/><EvidencePanel trace={message.trace}/></>:<div className="chatgpt-user-text">{message.text}</div>}</div></div></article>)}{loading&&<article className="chatgpt-message agent"><div className="chatgpt-message-inner"><div className="chatgpt-message-icon"><AgentIcon/></div><div className="chatgpt-message-content"><div className="chatgpt-message-name">Riskora AI</div><div className="chatgpt-thinking"><i/><i/><i/> Thinking through the relevant engines</div></div></div></article>}</div></div><form className="chatgpt-composer" onSubmit={send}><div className="chatgpt-composer-box"><textarea value={question} onChange={e=>setQuestion(e.target.value)} placeholder="Message Riskora AI..." rows="1"/><button disabled={!question.trim()||loading} aria-label="Send message"><span className="send-glyph" aria-hidden="true" /></button></div><div className="chatgpt-composer-meta">Riskora AI can make mistakes. Verify important decisions.</div></form></main></section>}
