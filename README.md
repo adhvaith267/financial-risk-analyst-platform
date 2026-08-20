@@ -1,164 +1,123 @@
-<div align="center">
+# Financial Risk Analyst Platform
 
-# Riskora
+A full-stack application for assessing credit risk, portfolio market risk, and the impact of configurable stress scenarios. It provides a React interface, a FastAPI API, persisted assessment results, and an AI analyst endpoint that uses implemented risk tools to answer natural-language questions.
 
-**AI-powered financial risk analyst platform.**
-Ask a question in plain English — get a numbers-first answer backed by a trained ML model, deterministic quant engines, and an LLM that only synthesises, never invents.
+## Core functionality
 
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-ReAct%20agent-1C3C3C)](https://www.langchain.com/langgraph)
-[![Amazon Bedrock](https://img.shields.io/badge/Amazon%20Bedrock-Kimi%20K2-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/bedrock/)
-[![Amazon SageMaker](https://img.shields.io/badge/SageMaker-LightGBM%20PD-232F3E?logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+### Credit risk assessment
 
-**Live → [riskora.online](https://riskora.online)**
+For a selected borrower, the platform obtains probability of default (PD) from the configured Amazon SageMaker endpoint. It then calculates:
 
-</div>
+- **Loss given default (LGD):** `1 - recovery rate`
+- **Exposure at default (EAD):** active-loan outstanding balance
+- **Expected loss (EL):** `PD × LGD × EAD`
 
----
+The response also includes the model status, version, configured decline threshold, and any risk drivers returned by the model.
 
-## What it does
+### Market risk assessment
 
-Riskora combines three risk engines with a LangGraph ReAct agent on Amazon Bedrock to answer questions like *"Assess borrower B1001"* or *"What happens to portfolio P001 in a recession?"*
+The market-risk engine applies current portfolio quantities to stored daily price history. It calculates portfolio value, daily and annualized volatility, historical VaR at 95% and 99%, parametric VaR at 95%, expected shortfall at 95%, maximum drawdown, position weights, a return-correlation matrix, and concentration through the Herfindahl–Hirschman Index (HHI).
 
-| Engine | What it computes |
-|---|---|
-| **Credit Risk** | PD (via SageMaker LightGBM), LGD, EAD, Expected Loss + SHAP drivers |
-| **Market Risk** | Historical-simulation VaR, Expected Shortfall, volatility, drawdown, HHI |
-| **Stress Testing** | Combined equity + rate + default shock across portfolio and loan book |
+It flags risk drivers when a position is at least 20% of the portfolio or when a pair of assets has return correlation of at least 0.70.
 
-The LLM reads tool outputs and explains them in plain language. It never computes a number itself.
+### Stress testing
 
----
+Stress tests combine three configurable shocks:
 
-## Architecture
+- an equity-price shock applied to equity holdings;
+- an interest-rate shock in basis points applied to bond holdings using modified duration; and
+- a relative PD shock applied across the active loan book.
 
-```
-  Browser
-    │  HTTPS
-    ▼
-  Nginx  (EC2 t3.small)
-    ├── /          → React SPA
-    └── /api/*     → FastAPI :8000
-                        │
-                   LangGraph ReAct Agent
-                        │
-          ┌─────────────┼──────────────┐
-          ▼             ▼              ▼
-    Credit Risk    Market Risk    Stress Test
-    Engine         Engine         Engine
-          │             │              │
-          └─────────────┴──────────────┘
-                        │
-                   RDS PostgreSQL
-                   (borrowers, loans, portfolios,
-                    market_prices, risk_results …)
-          │
-          ▼
-    SageMaker Endpoint          Amazon Bedrock
-    LightGBM PD model           Kimi K2 Thinking
-    (real-time inference)       (synthesis only)
+The result separates market and credit losses, reports combined loss, compares baseline and stressed portfolio value and total expected loss, and returns identified vulnerabilities.
+
+### AI analyst
+
+The `/agent/ask` endpoint runs a LangGraph ReAct agent with five tools: borrower lookup, portfolio lookup, credit-risk assessment, market-risk assessment, and stress-scenario execution. The agent selects relevant tools, receives their structured output, and returns an answer with the executed tool trace. Its prompt requires quantitative values in the response to come from tool results rather than being estimated by the model.
+
+## How it works
+
+```text
+React web application
+        |
+        | /api requests
+        v
+FastAPI service
+  |-- Credit risk engine ----> SageMaker PD endpoint
+  |-- Market risk engine ----> PostgreSQL price and holding data
+  |-- Stress-test engine ----> PostgreSQL loans, holdings, and prices
+  |-- LangGraph agent -------> Bedrock model + the same risk tools
+        |
+        v
+PostgreSQL stores borrowers, loans, portfolios, holdings, prices,
+and persisted credit, market, and stress-test results.
 ```
 
----
+The dashboard aggregates database counts, active-loan exposure, computed portfolio metrics, recent assessments, and frequent credit-risk drivers from saved results.
 
-## Risk Engines
+## Application areas
 
-### Credit Risk
-Computes the four Basel-aligned credit risk metrics for any borrower:
+The React application exposes five areas:
 
-- **PD (Probability of Default)** — LightGBM model deployed on SageMaker, trained on the Give Me Some Credit dataset, Optuna-tuned and isotonic-calibrated (Brier score 0.1421 → 0.0487). Returns a probability in [0, 1].
-- **LGD (Loss Given Default)** — deterministic, based on loan collateral and seniority.
-- **EAD (Exposure at Default)** — outstanding principal + accrued interest at the assessment date.
-- **EL (Expected Loss)** — `PD × LGD × EAD`. The single number that captures total credit exposure.
-- **SHAP drivers** — top features that pushed the PD up or down for that specific borrower.
-
-### Market Risk
-Historical-simulation approach — no distributional assumptions, just 2 years of daily price data:
-
-- **VaR (Value at Risk)** — the loss not exceeded with 95% confidence over a 1-day horizon.
-- **ES (Expected Shortfall / CVaR)** — average loss in the worst 5% of days. More conservative than VaR, captures tail risk.
-- **Volatility** — annualised daily return standard deviation.
-- **Max Drawdown** — largest peak-to-trough decline in the period.
-- **HHI (Herfindahl-Hirschman Index)** — portfolio concentration score. 1.0 = fully concentrated, approaches 0 = perfectly diversified.
-
-### Stress Testing
-Applies three simultaneous shocks and recomputes the full portfolio P&L:
-
-- **Equity shock** — configurable percentage drop applied to all equity holdings.
-- **Rate shock** — basis-point shift applied to bond holdings via modified duration.
-- **Default shock** — forces a subset of borrowers to default, realising LGD × EAD as a loss.
-
-Returns pre-shock vs post-shock portfolio value, loss breakdown by component, and per-borrower impact.
-
----
-
-## AI Agent
-
-The agent is a LangGraph ReAct loop backed by Amazon Bedrock (Kimi K2 Thinking).
-
-It has five tools:
-
-| Tool | What it does |
-|---|---|
-| `get_borrower` | Fetches borrower profile + active loan from the database |
-| `get_portfolio` | Fetches portfolio holdings from the database |
-| `assess_credit_risk` | Runs the full credit risk engine for a borrower |
-| `assess_market_risk` | Runs the market risk engine for a portfolio |
-| `run_stress_scenario` | Applies a shock scenario to a portfolio and loan book |
-
-The LLM decides which tools to call and in what order based on the question. It then receives all tool outputs as structured JSON and writes a plain-language answer. It never produces a number that wasn't first computed by a tool.
-
-Example flow for *"Assess borrower B1001 and show the recession impact on P001"*:
-```
-Question
-  → assess_credit_risk(B1001)   [SageMaker + credit engine]
-  → run_stress_scenario(P001)   [stress engine]
-  → Bedrock synthesises both outputs into a single answer
-```
-
----
-
-## Data Model
-
-| Table | Contents |
-|---|---|
-| `borrowers` | Credit profiles (GMSC feature set — exact SageMaker input shape) |
-| `loans` | Active and closed loans |
-| `payments` | Payment history |
-| `portfolios` | Named portfolios |
-| `portfolio_holdings` | Asset quantities per portfolio |
-| `assets` | Asset metadata (equity / bond / cash) |
-| `market_prices` | Daily close prices (2-year history) |
-| `risk_results` | Persisted credit and market assessments |
-| `stress_results` | Persisted stress-test results |
-
----
+- **Dashboard:** portfolio and loan KPIs, recent analyses, and recurring risk drivers.
+- **Credit Risk:** borrower selection and credit-assessment results.
+- **Market Risk:** portfolio metrics, composition, value history, correlations, and risk drivers.
+- **Stress Testing:** scenario inputs and baseline-versus-stressed outcomes.
+- **AI Analyst:** natural-language questions with an execution trace.
 
 ## API
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/health` | Liveness check |
-| `GET` | `/api/dashboard/summary` | Headline KPIs + recent analyses |
-| `GET` | `/api/credit/borrowers` | List all borrowers |
-| `GET` | `/api/credit/borrowers/{id}/assess` | PD / LGD / EAD / EL + SHAP drivers |
-| `GET` | `/api/market/portfolios` | List portfolios |
-| `GET` | `/api/market/portfolios/{id}/risk` | VaR / ES / volatility / drawdown |
-| `POST` | `/api/stress/portfolios/{id}/run` | Run a shock scenario |
-| `POST` | `/api/agent/ask` | Natural-language question → answer + trace |
+The FastAPI service uses `/api` as its public application prefix.
 
----
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/health` | Service health check |
+| `GET` | `/api/dashboard/summary` | Dashboard metrics and recent analyses |
+| `GET` | `/api/credit/borrowers` | Available borrowers |
+| `GET` | `/api/credit/borrowers/{borrower_id}/assess` | Credit-risk assessment; accepts optional `explain=true` |
+| `GET` | `/api/market/portfolios` | Available portfolios |
+| `GET` | `/api/market/portfolios/{portfolio_id}/risk` | Market-risk assessment |
+| `POST` | `/api/stress/portfolios/{portfolio_id}/run` | Run a stress scenario |
+| `POST` | `/api/agent/ask` | Ask the AI analyst a question |
 
-## Related Repository
+## Data and persistence
 
-PD model training and deployment:
-[`adhvaith267/credit-default-pd-model`](https://github.com/adhvaith267/credit-default-pd-model)
+The database schema includes borrowers, loans, payments, assets, portfolios, portfolio holdings, daily market prices, saved risk results, and saved stress-test results.
 
-- LightGBM trained on Give Me Some Credit dataset
-- Optuna hyperparameter tuning, isotonic calibration
-- Brier score: 0.1421 → 0.0487 after calibration
-- SHAP global + local explanations
-- Deployed to `gmsc-pd-endpoint` on Amazon SageMaker
+The included seed script loads a sample of borrower data from the configured S3 object, creates demo loans, and creates a demo portfolio. Its market-price history is generated synthetically for demonstration purposes.
+
+## Running locally
+
+1. Copy `backend/.env.example` to `backend/.env` and set the database and AWS integration values.
+2. Start the API:
+
+   ```bash
+   cd backend
+   uv sync
+   uv run alembic upgrade head
+   uv run uvicorn app.main:app --reload
+   ```
+
+3. In a second terminal, start the web application:
+
+   ```bash
+   cd frontend
+   npm ci
+   npm run dev
+   ```
+
+Vite serves the frontend on port `5173` and proxies `/api` requests to the FastAPI service on port `8000`.
+
+## Deployment
+
+The repository contains deployment configuration for an Amazon Linux EC2 host. Nginx serves the built React application and reverse-proxies `/api/` requests to Uvicorn on `127.0.0.1:8000`; a systemd unit runs the API service. Shell scripts provision EC2, the application IAM role, and an RDS PostgreSQL instance, then configure the host and run Alembic migrations.
+
+## Technology, AWS services, and tools
+
+| Category | Used in this project |
+| --- | --- |
+| Frontend | React, React Router, Axios, Vite |
+| Backend | Python, FastAPI, Uvicorn, Pydantic, SQLAlchemy |
+| Data and analysis | PostgreSQL, Alembic, NumPy, pandas, SciPy |
+| AI and orchestration | LangGraph, LangChain Core, LangChain AWS |
+| AWS services | Amazon Bedrock, Amazon SageMaker Runtime, Amazon RDS for PostgreSQL, Amazon EC2, Amazon S3, IAM |
+| Deployment and development tools | Nginx, systemd, uv, npm, AWS CLI, pytest, Ruff |
