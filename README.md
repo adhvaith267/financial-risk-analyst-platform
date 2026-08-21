@@ -317,44 +317,96 @@ Borrower and portfolio IDs are case-insensitive in the frontend client — they 
 
 ## Data model
 
+The schema has two parallel books that share no foreign key — the **credit book** (borrowers, loans, payments) and the **market book** (assets, market prices, portfolios, holdings). Stress tests and audit results sit alongside both books and reference them loosely via string IDs.
+
 ```
-borrowers ──────┐
-   borrower_id  │  (primary key, string)
-   name         │
-   age          │   10 GMSC feature columns...
-   ...          │
-                │
-loans ──────────┘ (FK: borrower_id)
-   loan_id
-   loan_type
-   outstanding_balance   (EAD approximation)
-   recovery_rate         (LGD = 1 − recovery_rate)
-   status                ("active" | "closed")
+╔══════════════════════════════════════╗     ╔══════════════════════════════════════════╗
+║  CREDIT BOOK                         ║     ║  MARKET BOOK                             ║
+╠══════════════════════════════════════╣     ╠══════════════════════════════════════════╣
+║                                      ║     ║                                          ║
+║  ┌─────────────────────────────┐     ║     ║  ┌───────────────────────────────┐       ║
+║  │         borrowers           │     ║     ║  │           assets              │       ║
+║  ├─────────────────────────────┤     ║     ║  ├───────────────────────────────┤       ║
+║  │ PK  borrower_id  VARCHAR    │     ║     ║  │ PK  asset_id        VARCHAR   │       ║
+║  │     name         VARCHAR    │     ║     ║  │     name            VARCHAR   │       ║
+║  │     age          INTEGER    │     ║     ║  │     asset_class     VARCHAR   │       ║
+║  │     revolving_utilization.. │     ║     ║  │         (equity|bond|cash)    │       ║
+║  │     number_30_59_days_past  │     ║     ║  └───────────────┬───────────────┘       ║
+║  │     debt_ratio   FLOAT      │     ║     ║                  │ 1                     ║
+║  │     monthly_income  FLOAT   │     ║     ║                  │                       ║
+║  │     number_open_credit..    │     ║     ║                  │ N                     ║
+║  │     number_90_days_late     │     ║     ║  ┌───────────────▼───────────────┐       ║
+║  │     number_re_loans         │     ║     ║  │        market_prices          │       ║
+║  │     number_60_89_days_past  │     ║     ║  ├───────────────────────────────┤       ║
+║  │     number_of_dependents    │     ║     ║  │ PK  id           SERIAL       │       ║
+║  │     created_at   TIMESTAMPZ │     ║     ║  │ FK  asset_id     VARCHAR      │       ║
+║  └──────────────┬──────────────┘     ║     ║  │     price_date   DATE         │       ║
+║                 │ 1                  ║     ║  │     close_price  FLOAT        │       ║
+║                 │                    ║     ║  └───────────────────────────────┘       ║
+║                 │ N                  ║     ║                                          ║
+║  ┌──────────────▼──────────────┐     ║     ║  ┌───────────────────────────────┐       ║
+║  │           loans             │     ║     ║  │         portfolios            │       ║
+║  ├─────────────────────────────┤     ║     ║  ├───────────────────────────────┤       ║
+║  │ PK  loan_id      VARCHAR    │     ║     ║  │ PK  portfolio_id  VARCHAR     │       ║
+║  │ FK  borrower_id  VARCHAR    │     ║     ║  │     name          VARCHAR     │       ║
+║  │     loan_type    VARCHAR    │     ║     ║  └───────────────┬───────────────┘       ║
+║  │     outstanding_balance     │     ║     ║                  │ 1                     ║
+║  │       FLOAT  ← EAD proxy   │     ║     ║                  │                       ║
+║  │     recovery_rate  FLOAT    │     ║     ║                  │ N                     ║
+║  │       ← LGD = 1 − rate     │     ║     ║  ┌───────────────▼───────────────┐       ║
+║  │     origination_date  DATE  │     ║     ║  │      portfolio_holdings       │       ║
+║  │     status  VARCHAR         │     ║     ║  ├───────────────────────────────┤       ║
+║  │       (active|closed)       │     ║     ║  │ PK  id            SERIAL      │       ║
+║  └──────────────┬──────────────┘     ║     ║  │ FK  portfolio_id  VARCHAR ────┼──┐   ║
+║                 │ 1                  ║     ║  │ FK  asset_id      VARCHAR ────┼──┘   ║
+║                 │                    ║     ║  │     quantity      FLOAT       │       ║
+║                 │ N                  ║     ║  │     as_of_date    DATE        │       ║
+║  ┌──────────────▼──────────────┐     ║     ║  └───────────────────────────────┘       ║
+║  │          payments           │     ║     ║                                          ║
+║  ├─────────────────────────────┤     ║     ╚══════════════════════════════════════════╝
+║  │ PK  payment_id   SERIAL     │     ║
+║  │ FK  loan_id      VARCHAR    │     ║     ╔══════════════════════════════════════════╗
+║  │     payment_date DATE       │     ║     ║  AUDIT / RESULTS                         ║
+║  │     amount       FLOAT      │     ║     ╠══════════════════════════════════════════╣
+║  │     status       VARCHAR    │     ║     ║                                          ║
+║  │       (paid|missed|...)     │     ║     ║  ┌───────────────────────────────┐       ║
+║  └─────────────────────────────┘     ║     ║  │         risk_results          │       ║
+║                                      ║     ║  ├───────────────────────────────┤       ║
+╚══════════════════════════════════════╝     ║  │ PK  id           SERIAL       │       ║
+                                             ║  │     entity_type  VARCHAR      │       ║
+                                             ║  │       (borrower|portfolio)    │       ║
+                                             ║  │     entity_id    VARCHAR ·····│·· loose ref to
+                                             ║  │     risk_type    VARCHAR      │       ║  borrower_id
+                                             ║  │       (credit|market)         │       ║  or portfolio_id
+                                             ║  │     payload      JSON         │       ║
+                                             ║  │       pd/lgd/ead/el           │       ║
+                                             ║  │       var/es/volatility/...   │       ║
+                                             ║  │     computed_at  TIMESTAMPZ   │       ║
+                                             ║  └───────────────────────────────┘       ║
+                                             ║                                          ║
+                                             ║  ┌───────────────────────────────┐       ║
+                                             ║  │        stress_results         │       ║
+                                             ║  ├───────────────────────────────┤       ║
+                                             ║  │ PK  id             SERIAL     │       ║
+                                             ║  │     portfolio_id   VARCHAR ···│·· loose ref
+                                             ║  │     scenario_name  VARCHAR    │       ║
+                                             ║  │     shocks         JSON       │       ║
+                                             ║  │       equity_shock            │       ║
+                                             ║  │       rate_shock_bps          │       ║
+                                             ║  │       default_shock           │       ║
+                                             ║  │     market_loss    FLOAT      │       ║
+                                             ║  │     credit_loss    FLOAT      │       ║
+                                             ║  │     combined_loss  FLOAT      │       ║
+                                             ║  │     computed_at    TIMESTAMPZ │       ║
+                                             ║  └───────────────────────────────┘       ║
+                                             ║                                          ║
+                                             ╚══════════════════════════════════════════╝
 
-payments (FK: loan_id)
-   payment_date, amount, status
-
-assets
-   asset_id (ticker), name, asset_class ("equity" | "bond" | "cash")
-
-market_prices (FK: asset_id)
-   price_date, close_price
-
-portfolios
-   portfolio_id, name
-
-portfolio_holdings (FK: portfolio_id, asset_id)
-   quantity, as_of_date
-
-risk_results
-   entity_type, entity_id, risk_type ("credit" | "market")
-   payload (JSON)   — persisted after each assessment
-   computed_at
-
-stress_results
-   portfolio_id, scenario_name
-   shocks (JSON), market_loss, credit_loss, combined_loss
-   computed_at
+  Legend
+  ──────
+  PK   Primary key           FK   Foreign key (enforced by DB)
+  ·    Loose reference       1    One side of a relationship
+  N    Many side             SERIAL  Auto-incrementing integer
 ```
 
 There is no foreign key between portfolios and loans. The credit book (borrowers + loans) and the market book (portfolios + holdings) are parallel, not nested. The stress test always applies the default shock firm-wide across all active loans, regardless of which portfolio ID is passed in the URL.
