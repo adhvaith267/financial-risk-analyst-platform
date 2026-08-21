@@ -84,8 +84,37 @@ const apiPost = <T>(path: string, body: unknown, mockKey?: string) =>
 /* ---- Endpoint wrappers ------------------------------------------- */
 
 /** GET /api/dashboard/summary */
-export const getDashboardSummary = <T = unknown>() =>
-  apiGet<T>("/api/dashboard/summary");
+export const getDashboardSummary = async <T = unknown>(): Promise<T> => {
+  const raw = await apiGet<Record<string, unknown>>("/api/dashboard/summary");
+  return shapeDashboardResponse(raw) as T;
+};
+
+function shapeDashboardResponse(raw: Record<string, unknown>): Record<string, unknown> {
+  // The real backend uses different field names than the mock/UI expects.
+  // Map them here so DashboardView metrics display real data.
+  return {
+    ...raw,
+    portfolio_value: raw["total_portfolio_value"] ?? raw["portfolio_value"],
+    total_exposure: raw["total_exposure"],
+    high_risk_borrowers: raw["high_risk_borrower_count"] ?? raw["high_risk_borrowers"],
+    var: raw["headline_var_95"] ?? raw["var"],
+    var_confidence: "95%, 1d",
+    expected_shortfall: raw["headline_expected_shortfall_95"] ?? raw["expected_shortfall"],
+    annualized_volatility: raw["headline_annualized_volatility"] ?? raw["annualized_volatility"],
+    max_drawdown: raw["headline_max_drawdown"] ?? raw["max_drawdown"],
+    signals_monitored:
+      ((raw["borrower_count"] as number) ?? 0) +
+      ((raw["portfolio_count"] as number) ?? 0),
+    // top_risk_drivers: array of { driver, count } → remap to { name, contribution }
+    top_risk_drivers: Array.isArray(raw["top_risk_drivers"])
+      ? (raw["top_risk_drivers"] as Record<string, unknown>[]).map((d) => ({
+          name: d["driver"] ?? d["name"] ?? "—",
+          contribution: Number(d["count"] ?? d["contribution"] ?? 0),
+        }))
+      : raw["top_risk_drivers"],
+    recent_analyses: raw["recent_analyses"],
+  };
+}
 
 /**
  * Credit risk assessment.
@@ -112,11 +141,24 @@ export const runCreditAnalysis = async <T = unknown>(
 
 function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unknown> {
   const borrower = (raw["borrower"] as Record<string, unknown> | undefined) ?? {};
+
+  // risk_drivers from real API is an array of strings; convert to object for ResultBlock
+  const riskDriversRaw = raw["risk_drivers"];
+  const riskDriversObj =
+    Array.isArray(riskDriversRaw) && riskDriversRaw.length > 0
+      ? riskDriversRaw.reduce<Record<string, string>>((acc, d, i) => {
+          acc[`Driver ${i + 1}`] = String(d);
+          return acc;
+        }, {})
+      : Array.isArray(riskDriversRaw) && riskDriversRaw.length === 0
+      ? undefined
+      : riskDriversRaw;
+
   return {
     ...raw,
     // UI expects probability_of_default, decline_threshold, etc.
     probability_of_default: raw["pd"] ?? raw["probability_of_default"],
-    decline_threshold: raw["decline_threshold"] ?? 0.05,
+    decline_threshold: raw["decline_threshold"] ?? 0.1,
     loss_given_default: raw["lgd"] ?? raw["loss_given_default"],
     exposure_at_default: raw["ead"] ?? raw["exposure_at_default"],
     expected_loss: raw["expected_loss"],
@@ -126,6 +168,7 @@ function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unkno
       ? {
           borrower_id: borrower["borrower_id"],
           name: borrower["name"],
+          age: borrower["age"],
           annual_income: borrower["monthly_income"] != null
             ? `$${(Number(borrower["monthly_income"]) * 12).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
             : undefined,
@@ -134,18 +177,27 @@ function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unkno
             ? `$${Number(borrower["outstanding_balance"]).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
             : undefined,
           debt_to_income: borrower["debt_ratio"] != null
-            ? String(Number(borrower["debt_ratio"]).toFixed(2))
+            ? String(Number(borrower["debt_ratio"]).toFixed(3))
             : undefined,
           revolving_utilization: borrower["revolving_utilization"],
-          age: borrower["age"],
           loan_type: borrower["loan_type"],
           total_delinquencies: borrower["total_delinquencies"],
         }
       : raw["borrower_profile"],
-    // Keep risk_drivers, evidence, methodology from the raw response
-    risk_drivers: raw["risk_drivers"],
-    evidence: raw["evidence"],
-    methodology: raw["methodology"],
+    risk_drivers: riskDriversObj,
+    model_version: raw["model_version"],
+    evidence:
+      raw["evidence"] ??
+      (raw["model_version"]
+        ? { "Model version": String(raw["model_version"]), "Methodology": "PD × LGD × EAD" }
+        : undefined),
+    methodology:
+      raw["methodology"] ??
+      {
+        PD: "SageMaker XGBoost scorecard",
+        LGD: "1 − recovery rate",
+        "Expected loss": "PD × LGD × EAD",
+      },
   };
 }
 
@@ -170,21 +222,59 @@ export const runMarketAnalysis = async <T = unknown>(
 };
 
 function shapeMarketResponse(raw: Record<string, unknown>): Record<string, unknown> {
+  // Convert weights dict { AAPL: 0.23, ... } to composition array [{ symbol, value }]
+  const composition =
+    raw["composition"] ??
+    raw["holdings"] ??
+    (raw["weights"] && typeof raw["weights"] === "object" && !Array.isArray(raw["weights"])
+      ? Object.entries(raw["weights"] as Record<string, number>).map(([symbol, weight]) => ({
+          symbol,
+          value: weight * Number(raw["portfolio_value"] ?? 0),
+        }))
+      : undefined);
+
+  // history can be value_history [{date, value}] or price_history
+  const history =
+    raw["history"] ??
+    raw["value_history"] ??
+    raw["price_history"];
+
+  // risk_drivers from real API is an array of strings; show as object for ResultBlock
+  const riskDriversRaw = raw["risk_drivers"];
+  const explanation =
+    raw["explanation"] ??
+    (Array.isArray(riskDriversRaw)
+      ? riskDriversRaw.reduce<Record<string, string>>((acc, d, i) => {
+          acc[`Driver ${i + 1}`] = String(d);
+          return acc;
+        }, {})
+      : riskDriversRaw);
+
   return {
     ...raw,
-    // Map backend field names to what the UI expects
     var: raw["historical_var_95"] ?? raw["var"],
     var_confidence: "95%, 1d",
     expected_shortfall: raw["expected_shortfall_95"] ?? raw["expected_shortfall"],
     volatility: raw["annualized_volatility"] ?? raw["volatility"],
     max_drawdown: raw["max_drawdown"],
     portfolio_value: raw["portfolio_value"],
-    composition: raw["composition"] ?? raw["holdings"],
-    history: raw["price_history"] ?? raw["history"],
-    // Concentration / risk contribution info
-    concentration: raw["concentration"] ?? raw["risk_factors"],
-    risk_contributions: raw["risk_contributions"],
-    explanation: raw["explanation"] ?? raw["risk_drivers"],
+    composition,
+    history,
+    concentration: raw["concentration"] ?? {
+      "HHI (concentration)": String(Number(raw["hhi"] ?? 0).toFixed(4)),
+      "Largest position weight": `${(Number(raw["max_position_weight"] ?? 0) * 100).toFixed(1)}%`,
+    },
+    risk_contributions: raw["risk_contributions"] ??
+      (raw["weights"]
+        ? Object.fromEntries(
+            Object.entries(raw["weights"] as Record<string, number>).map(([k, v]) => [
+              k,
+              `${(v * 100).toFixed(1)}%`,
+            ]),
+          )
+        : undefined),
+    explanation,
+    correlation: raw["correlation_matrix"] ?? raw["correlation"],
   };
 }
 
