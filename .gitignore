@@ -1,17 +1,38 @@
-# Private — never push
+# ── Private ops / secrets ───────────────────────────────────────────────────
 PRIVATE_OPS.md
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
 
-# Local backups
-frontend_backup/
-
+# ── Python ──────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
-.venv/
-.env
+*.pyo
+*.pyd
 *.egg-info/
+.venv/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+
+# ── Node / frontend ─────────────────────────────────────────────────────────
 node_modules/
 dist/
 build/
+.vite/
+
+# ── OS / editor ─────────────────────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.iml
+
+# ── Local backups / scratch ─────────────────────────────────────────────────
+frontend_backup/

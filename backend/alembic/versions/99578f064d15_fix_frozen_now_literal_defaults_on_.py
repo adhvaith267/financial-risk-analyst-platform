@@ -1,7 +1,7 @@
 """fix frozen now() literal defaults on timestamp columns
 
 Revision ID: 99578f064d15
-Revises: 54201d99b481
+Revises: 021eeffc43f5
 Create Date: 2026-08-19 23:58:29.126454
 
 """
@@ -13,12 +13,11 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '99578f064d15'
-down_revision: Union[str, None] = '54201d99b481'
+down_revision: Union[str, None] = '021eeffc43f5'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# methodology_chunks removed from this list — RAG pipeline deleted.
 TABLES_AND_COLUMNS = [
     ("borrowers", "created_at"),
     ("risk_results", "computed_at"),

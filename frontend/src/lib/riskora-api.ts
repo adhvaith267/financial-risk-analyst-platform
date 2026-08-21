@@ -63,7 +63,9 @@ async function request<T>(path: string, init?: RequestInit, mockKey?: string, bo
     } catch {
       /* response had no JSON body */
     }
-    if (response.status === 404 || response.status >= 500)
+    // Only fall back to mock on 5xx (server errors); surface 4xx as real errors
+    // so bad input (wrong ID, missing resource) is visible to the user.
+    if (response.status >= 500)
       return fallback<T>(mockKey ?? path, body);
     throw new RiskoraApiError(detail, response.status);
   }
@@ -126,7 +128,7 @@ function shapeDashboardResponse(raw: Record<string, unknown>): Record<string, un
 export const runCreditAnalysis = async <T = unknown>(
   payload: Record<string, unknown>,
 ): Promise<T> => {
-  const borrowerId = String(payload["borrower_id"] ?? "").trim();
+  const borrowerId = String(payload["borrower_id"] ?? "").trim().toUpperCase();
   if (!borrowerId) throw new RiskoraApiError("borrower_id is required", 400);
 
   const raw = await apiGet<Record<string, unknown>>(
@@ -210,7 +212,7 @@ function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unkno
 export const runMarketAnalysis = async <T = unknown>(
   payload: Record<string, unknown>,
 ): Promise<T> => {
-  const portfolioId = String(payload["portfolio_id"] ?? "").trim();
+  const portfolioId = String(payload["portfolio_id"] ?? "").trim().toUpperCase();
   if (!portfolioId) throw new RiskoraApiError("portfolio_id is required", 400);
 
   const raw = await apiGet<Record<string, unknown>>(
@@ -287,7 +289,7 @@ function shapeMarketResponse(raw: Record<string, unknown>): Record<string, unkno
 export const runStressTest = async <T = unknown>(
   payload: Record<string, unknown>,
 ): Promise<T> => {
-  const portfolioId = String(payload["target_id"] ?? payload["portfolio_id"] ?? "").trim();
+  const portfolioId = String(payload["target_id"] ?? payload["portfolio_id"] ?? "").trim().toUpperCase();
   if (!portfolioId) throw new RiskoraApiError("portfolio/target ID is required", 400);
 
   const scenarios = Array.isArray(payload["scenarios"])
