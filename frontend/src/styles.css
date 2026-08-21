@@ -1,0 +1,317 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Riskora design system.
+ * Deep forest ground, pale mint surfaces, restrained lime signal accent.
+ * All colors use oklch. Never hardcode colors in components.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-forest: var(--forest);
+  --color-forest-deep: var(--forest-deep);
+  --color-forest-raised: var(--forest-raised);
+  --color-mint: var(--mint);
+  --color-mint-deep: var(--mint-deep);
+  --color-lime: var(--lime);
+  --color-signal: var(--signal);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+}
+
+:root {
+  --radius: 0.25rem;
+
+  /* Financial ink-and-gold palette */
+  --forest-deep: oklch(0.17 0.032 265);
+  --forest: oklch(0.22 0.036 265);
+  --forest-raised: oklch(0.28 0.038 265);
+  --mint: oklch(0.96 0.012 90);
+  --mint-deep: oklch(0.9 0.024 88);
+  --lime: oklch(0.84 0.145 86);
+  --signal: oklch(0.72 0.115 52);
+  --hairline: oklch(0.96 0.012 90 / 13%);
+  --hairline-strong: oklch(0.96 0.012 90 / 26%);
+
+  --background: var(--forest-deep);
+  --foreground: var(--mint);
+  --card: var(--forest);
+  --card-foreground: var(--mint);
+  --popover: var(--forest);
+  --popover-foreground: var(--mint);
+  --primary: var(--lime);
+  --primary-foreground: oklch(0.19 0.035 265);
+  --secondary: var(--forest-raised);
+  --secondary-foreground: var(--mint);
+  --muted: var(--forest-raised);
+  --muted-foreground: oklch(0.76 0.018 90);
+  --accent: var(--forest-raised);
+  --accent-foreground: var(--lime);
+  --destructive: oklch(0.62 0.17 25);
+  --destructive-foreground: oklch(0.97 0.01 28);
+  --border: var(--hairline);
+  --input: var(--hairline-strong);
+  --ring: var(--lime);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.015em;
+  }
+
+  ::selection {
+    background: var(--lime);
+    color: var(--primary-foreground);
+  }
+}
+
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--lime);
+}
+
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+@utility surface-pale {
+  background-color: var(--mint);
+  color: oklch(0.2 0.035 265);
+}
+
+/* Motion --------------------------------------------------------------- */
+
+@keyframes riskora-radiate {
+  0% {
+    transform: scale(0.35);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.05);
+    opacity: 0;
+  }
+}
+
+@keyframes riskora-scan {
+  0% {
+    transform: translateY(-88px);
+    opacity: 0;
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(88px);
+    opacity: 0;
+  }
+}
+
+@keyframes riskora-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes riskora-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes riskora-bar {
+  0% {
+    transform: scaleY(0.3);
+  }
+  45% {
+    transform: scaleY(1);
+  }
+  100% {
+    transform: scaleY(0.55);
+  }
+}
+
+@keyframes riskora-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility radiate {
+  transform-origin: center;
+  animation: riskora-radiate 4.2s cubic-bezier(0.25, 0.6, 0.3, 1) infinite;
+}
+
+@utility scanline {
+  animation: riskora-scan 5.5s cubic-bezier(0.4, 0, 0.5, 1) infinite;
+}
+
+@utility orbit {
+  transform-origin: center;
+  animation: riskora-orbit 12s linear infinite;
+}
+
+@utility ping-ring {
+  animation: riskora-pulse 3.4s ease-in-out infinite;
+}
+
+@utility rise {
+  animation: riskora-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Ambient page backdrop ------------------------------------------------ */
+
+@keyframes riskora-drift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.12);
+  }
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+}
+
+@keyframes riskora-tape {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 -240px;
+  }
+}
+
+@utility page-aura {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+}
+
+@utility aura-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.28;
+  animation: riskora-drift 26s ease-in-out infinite;
+}
+
+@utility cursor-aura {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 44rem;
+  height: 44rem;
+  border-radius: 9999px;
+  opacity: 0;
+  transition: opacity 500ms ease;
+  will-change: transform;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--lime) 46%, transparent) 0%,
+    color-mix(in oklab, var(--lime) 18%, transparent) 38%,
+    transparent 68%
+  );
+  filter: blur(70px);
+}
+
+@utility aura-grid {
+  position: absolute;
+  inset: -20%;
+  background-image:
+    linear-gradient(to right, var(--hairline) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--hairline) 1px, transparent 1px);
+  background-size: 120px 120px;
+  opacity: 0.5;
+  mask-image: radial-gradient(circle at 50% 30%, black, transparent 72%);
+  animation: riskora-tape 24s linear infinite;
+}
+

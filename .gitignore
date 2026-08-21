@@ -1,6 +1,9 @@
 # Private — never push
 PRIVATE_OPS.md
 
+# Local backups
+frontend_backup/
+
 __pycache__/
 *.pyc
 .venv/

@@ -1,4 +1,0 @@
-import { NavLink, Link } from "react-router-dom"
-import { DashboardIcon, CreditIcon, MarketIcon, StressIcon, AgentIcon } from "../icons.jsx"
-const links=[{to:"/platform",label:"Dashboard",end:true,Icon:DashboardIcon},{to:"/credit",label:"Credit risk",Icon:CreditIcon},{to:"/market",label:"Market risk",Icon:MarketIcon},{to:"/stress",label:"Stress testing",Icon:StressIcon},{to:"/agent",label:"Riskora AI",Icon:AgentIcon}]
-export default function Sidebar(){return <aside className="sidebar"><Link to="/" className="sidebar-brand sidebar-brand-link"><div className="sidebar-brand-mark">R</div><div className="sidebar-brand-text">RISKORA<span>Workspace home</span></div></Link><nav className="sidebar-nav"><div className="nav-section-label">Workspace</div>{links.map(({to,label,end,Icon})=><NavLink key={to} to={to} end={end} className={({isActive})=>"sidebar-link"+(isActive?" active":"")}><Icon />{label}</NavLink>)}</nav></aside>}
