@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Play } from "lucide-react";
-import { runMarketAnalysis, RiskoraApiError } from "@/lib/riskora-api";
+import { runMarketAnalysis, RiskoraApiError, type MarketResult } from "@/lib/riskora-api";
 import {
   ColumnChart,
   EmptyState,
@@ -14,48 +14,6 @@ import {
   ViewHeader,
 } from "./ui";
 import { asMoney, asPct, buttonClass, inputClass } from "./presentation";
-
-type MarketResult = Record<string, unknown> & {
-  var?: unknown;
-  var_confidence?: unknown;
-  expected_shortfall?: unknown;
-  volatility?: unknown;
-  max_drawdown?: unknown;
-  composition?: unknown;
-  history?: unknown;
-  series?: unknown;
-  concentration?: unknown;
-  correlation?: unknown;
-  risk_contributions?: unknown;
-  evidence?: unknown;
-  explanation?: unknown;
-};
-
-function toColumns(data: unknown): { label: string; value: number }[] {
-  if (Array.isArray(data)) {
-    return data
-      .map((d) => {
-        const row = d as Record<string, unknown>;
-        const label = String(row["symbol"] ?? row["label"] ?? row["name"] ?? "");
-        const value = Number(row["value"] ?? row["weight"] ?? row["amount"]);
-        return { label, value };
-      })
-      .filter((d) => d.label && Number.isFinite(d.value));
-  }
-  if (data && typeof data === "object") {
-    return Object.entries(data as Record<string, unknown>)
-      .map(([label, v]) => ({ label, value: Number(v) }))
-      .filter((d) => Number.isFinite(d.value));
-  }
-  return [];
-}
-
-function toPoints(data: unknown): number[] {
-  if (!Array.isArray(data)) return [];
-  return data
-    .map((p) => (typeof p === "number" ? p : Number((p as Record<string, unknown>)?.["value"])))
-    .filter((n): n is number => Number.isFinite(n));
-}
 
 export function MarketRiskView() {
   const [portfolioId, setPortfolioId] = useState("");
@@ -76,10 +34,10 @@ export function MarketRiskView() {
     setStatus("loading");
     setError("");
     try {
-      const data = await runMarketAnalysis<MarketResult>({
+      const data = await runMarketAnalysis({
         portfolio_id: portfolioId.trim(),
         confidence_level: Number(confidence) / 100,
-        lookback_days: Number(window) || undefined,
+        lookback_days: Number(window) || 250,
       });
       setResult(data);
       setStatus("ready");
@@ -89,8 +47,8 @@ export function MarketRiskView() {
     }
   }
 
-  const composition = toColumns(result?.composition);
-  const points = toPoints(result?.history ?? result?.series);
+  const composition = result?.composition ?? [];
+  const points = result?.history.map(({ value }) => value) ?? [];
 
   return (
     <div className="space-y-8">
@@ -151,8 +109,8 @@ export function MarketRiskView() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Metric
               label="Value at risk"
-              value={asMoney(result.var ?? result["value_at_risk"])}
-              hint={result.var_confidence ? String(result.var_confidence) : undefined}
+              value={asMoney(result.var)}
+              hint={result.var_confidence}
             />
             <Metric label="Expected shortfall" value={asMoney(result.expected_shortfall)} />
             <Metric label="Volatility" value={asPct(result.volatility)} />
@@ -185,15 +143,15 @@ export function MarketRiskView() {
               )}
             </Panel>
             <Panel title="Concentration / correlation">
-              {(result.concentration ?? result.correlation) ? (
-                <ResultBlock data={result.concentration ?? result.correlation} />
+              {result.concentration ? (
+                <ResultBlock data={result.concentration} />
               ) : (
                 <EmptyState label="No concentration data returned." />
               )}
             </Panel>
             <Panel title="Evidence and explanation">
-              {(result.evidence ?? result.explanation) ? (
-                <ResultBlock data={result.evidence ?? result.explanation} />
+              {result.explanation ? (
+                <ResultBlock data={result.explanation} />
               ) : (
                 <EmptyState label="No explanation returned." />
               )}

@@ -1,17 +1,8 @@
 /**
  * Riskora API client.
  *
- * Adapted to match the real Riskora backend endpoints:
- *   GET  /api/dashboard/summary
- *   GET  /api/credit/borrowers
- *   GET  /api/credit/borrowers/{id}/assess
- *   GET  /api/market/portfolios
- *   GET  /api/market/portfolios/{id}/risk
- *   POST /api/stress/portfolios/{id}/run
- *   POST /api/agent/ask
- *
  * Set VITE_RISKORA_API_URL to point at a different backend origin; when unset
- * requests go to the same origin (Nginx proxies /api/ → FastAPI).
+ * requests go to the same origin (Nginx proxies /api/ to FastAPI).
  */
 
 const BASE =
@@ -20,6 +11,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 export class RiskoraApiError extends Error {
   status: number;
+
   constructor(message: string, status: number) {
     super(message);
     this.name = "RiskoraApiError";
@@ -31,6 +23,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
   try {
     response = await fetch(`${BASE}${path}`, {
       ...init,
@@ -53,21 +46,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `Request failed with status ${response.status}.`;
     try {
-      const errBody = (await response.json()) as {
-        detail?: string | { msg?: string; loc?: unknown[] }[];
+      const body = (await response.json()) as {
+        detail?: string | { msg?: string }[];
         message?: string;
         request_id?: string;
       };
-      if (typeof errBody.detail === "string") {
-        detail = errBody.detail;
-      } else if (Array.isArray(errBody.detail)) {
-        detail = errBody.detail.map((item) => item.msg ?? "Invalid request").join("; ");
-      } else {
-        detail = errBody.message ?? detail;
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        detail = body.detail.map((item) => item.msg ?? "Invalid request").join("; ");
+      } else if (body.message) {
+        detail = body.message;
       }
-      if (errBody.request_id) detail = `${detail} (request ${errBody.request_id})`;
+      if (body.request_id) detail = `${detail} (request ${body.request_id})`;
     } catch {
-      /* response had no JSON body */
+      /* The response did not contain a JSON error body. */
     }
     throw new RiskoraApiError(detail, response.status);
   }
@@ -85,299 +78,346 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const apiGet = <T>(path: string) => request<T>(path);
-
 const apiPost = <T>(path: string, body: unknown) =>
   request<T>(path, { method: "POST", body: JSON.stringify(body) });
 
-/* ---- Endpoint wrappers ------------------------------------------- */
-
-/** GET /api/dashboard/summary */
-export const getDashboardSummary = async <T = unknown>(): Promise<T> => {
-  const raw = await apiGet<Record<string, unknown>>("/api/dashboard/summary");
-  return shapeDashboardResponse(raw) as T;
+type BackendDashboardSummary = {
+  borrower_count: number;
+  loan_count: number;
+  portfolio_count: number;
+  stress_test_count: number;
+  total_portfolio_value: number;
+  total_exposure: number;
+  high_risk_borrower_count: number;
+  headline_portfolio_id: string | null;
+  headline_annualized_volatility: number | null;
+  headline_var_95: number | null;
+  headline_expected_shortfall_95: number | null;
+  headline_max_drawdown: number | null;
+  top_risk_drivers: { driver: string; count: number }[];
+  recent_analyses: {
+    entity_type: string;
+    entity_id: string;
+    risk_type: string;
+    label: string;
+    computed_at: string;
+  }[];
 };
 
-function shapeDashboardResponse(raw: Record<string, unknown>): Record<string, unknown> {
-  // The backend uses different field names than the UI expects.
-  // Map them here so DashboardView metrics display real data.
-  return {
-    ...raw,
-    portfolio_value: raw["total_portfolio_value"] ?? raw["portfolio_value"],
-    total_exposure: raw["total_exposure"],
-    high_risk_borrowers: raw["high_risk_borrower_count"] ?? raw["high_risk_borrowers"],
-    var: raw["headline_var_95"] ?? raw["var"],
-    var_confidence: "95%, 1d",
-    expected_shortfall: raw["headline_expected_shortfall_95"] ?? raw["expected_shortfall"],
-    annualized_volatility: raw["headline_annualized_volatility"] ?? raw["annualized_volatility"],
-    max_drawdown: raw["headline_max_drawdown"] ?? raw["max_drawdown"],
-    signals_monitored:
-      ((raw["borrower_count"] as number) ?? 0) + ((raw["portfolio_count"] as number) ?? 0),
-    // top_risk_drivers: array of { driver, count } → remap to { name, contribution }
-    top_risk_drivers: Array.isArray(raw["top_risk_drivers"])
-      ? (raw["top_risk_drivers"] as Record<string, unknown>[]).map((d) => ({
-          name: d["driver"] ?? d["name"] ?? "—",
-          contribution: Number(d["count"] ?? d["contribution"] ?? 0),
-        }))
-      : raw["top_risk_drivers"],
-    recent_analyses: raw["recent_analyses"],
-  };
-}
+export type DashboardSummary = {
+  portfolio_value: number;
+  total_exposure: number;
+  high_risk_borrowers: number;
+  var: number | null;
+  var_confidence: string;
+  expected_shortfall: number | null;
+  annualized_volatility: number | null;
+  max_drawdown: number | null;
+  signals_monitored: number;
+  top_risk_drivers: { name: string; contribution: number }[];
+  recent_analyses: BackendDashboardSummary["recent_analyses"];
+};
 
-/**
- * Credit risk assessment.
- * Real backend: GET /api/credit/borrowers/{borrower_id}/assess
- * The new UI sends { borrower_id, horizon_months } — we extract borrower_id
- * and make the correct GET request. The backend returns CreditAssessmentResponse
- * which we reshape to match what the UI components expect.
- */
-export const runCreditAnalysis = async <T = unknown>(
-  payload: Record<string, unknown>,
-): Promise<T> => {
-  const borrowerId = String(payload["borrower_id"] ?? "")
-    .trim()
-    .toUpperCase();
+/** GET /api/dashboard/summary. */
+export const getDashboardSummary = async (): Promise<DashboardSummary> => {
+  const raw = await apiGet<BackendDashboardSummary>("/api/dashboard/summary");
+  return {
+    portfolio_value: raw.total_portfolio_value,
+    total_exposure: raw.total_exposure,
+    high_risk_borrowers: raw.high_risk_borrower_count,
+    var: raw.headline_var_95,
+    var_confidence: "95%, 1d",
+    expected_shortfall: raw.headline_expected_shortfall_95,
+    annualized_volatility: raw.headline_annualized_volatility,
+    max_drawdown: raw.headline_max_drawdown,
+    signals_monitored: raw.borrower_count + raw.portfolio_count,
+    top_risk_drivers: raw.top_risk_drivers.map(({ driver, count }) => ({
+      name: driver,
+      contribution: count,
+    })),
+    recent_analyses: raw.recent_analyses,
+  };
+};
+
+type BackendBorrowerProfile = {
+  borrower_id: string;
+  name: string;
+  age: number;
+  monthly_income: number | null;
+  revolving_utilization: number;
+  debt_ratio: number;
+  total_delinquencies: number;
+  outstanding_balance: number | null;
+  loan_type: string | null;
+};
+
+type BackendCreditAssessment = {
+  borrower_id: string;
+  borrower: BackendBorrowerProfile;
+  pd: number;
+  lgd: number;
+  ead: number;
+  expected_loss: number;
+  status: string;
+  model_version: string;
+  risk_drivers: string[];
+  decline_threshold: number;
+};
+
+export type CreditResult = {
+  probability_of_default: number;
+  decline_threshold: number;
+  loss_given_default: number;
+  exposure_at_default: number;
+  expected_loss: number;
+  risk_grade: string;
+  borrower_profile: {
+    borrower_id: string;
+    name: string;
+    age: number;
+    annual_income: string | undefined;
+    loan_amount: string | undefined;
+    debt_to_income: string;
+    revolving_utilization: number;
+    loan_type: string | null;
+    total_delinquencies: number;
+  };
+  risk_drivers: Record<string, string> | undefined;
+  evidence: Record<string, string>;
+  methodology: Record<string, string>;
+};
+
+/** GET /api/credit/borrowers/{borrower_id}/assess. */
+export const runCreditAnalysis = async ({
+  borrower_id,
+}: {
+  borrower_id: string;
+}): Promise<CreditResult> => {
+  const borrowerId = borrower_id.trim().toUpperCase();
   if (!borrowerId) throw new RiskoraApiError("borrower_id is required", 400);
 
-  const raw = await apiGet<Record<string, unknown>>(
+  const raw = await apiGet<BackendCreditAssessment>(
     `/api/credit/borrowers/${encodeURIComponent(borrowerId)}/assess`,
   );
-
-  // The backend returns { borrower: {...}, pd, lgd, ead, expected_loss, status, risk_drivers, ... }
-  // Map to the shape the UI components expect.
-  return shapeCreditResponse(raw) as T;
-};
-
-function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unknown> {
-  const borrower = (raw["borrower"] as Record<string, unknown> | undefined) ?? {};
-
-  // risk_drivers from real API is an array of strings; convert to object for ResultBlock
-  const riskDriversRaw = raw["risk_drivers"];
-  const riskDriversObj =
-    Array.isArray(riskDriversRaw) && riskDriversRaw.length > 0
-      ? riskDriversRaw.reduce<Record<string, string>>((acc, d, i) => {
-          acc[`Driver ${i + 1}`] = String(d);
-          return acc;
-        }, {})
-      : Array.isArray(riskDriversRaw) && riskDriversRaw.length === 0
-        ? undefined
-        : riskDriversRaw;
+  const borrower = raw.borrower;
+  const riskDrivers = raw.risk_drivers.length
+    ? Object.fromEntries(raw.risk_drivers.map((driver, index) => [`Driver ${index + 1}`, driver]))
+    : undefined;
 
   return {
-    ...raw,
-    // UI expects probability_of_default, decline_threshold, etc.
-    probability_of_default: raw["pd"] ?? raw["probability_of_default"],
-    decline_threshold: raw["decline_threshold"] ?? 0.1,
-    loss_given_default: raw["lgd"] ?? raw["loss_given_default"],
-    exposure_at_default: raw["ead"] ?? raw["exposure_at_default"],
-    expected_loss: raw["expected_loss"],
-    risk_grade: raw["status"] ?? raw["risk_grade"],
-    // Build borrower_profile from nested borrower object
-    borrower_profile:
-      Object.keys(borrower).length > 0
-        ? {
-            borrower_id: borrower["borrower_id"],
-            name: borrower["name"],
-            age: borrower["age"],
-            annual_income:
-              borrower["monthly_income"] != null
-                ? `$${(Number(borrower["monthly_income"]) * 12).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : undefined,
-            credit_score: borrower["credit_score"],
-            loan_amount:
-              borrower["outstanding_balance"] != null
-                ? `$${Number(borrower["outstanding_balance"]).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : undefined,
-            debt_to_income:
-              borrower["debt_ratio"] != null
-                ? String(Number(borrower["debt_ratio"]).toFixed(3))
-                : undefined,
-            revolving_utilization: borrower["revolving_utilization"],
-            loan_type: borrower["loan_type"],
-            total_delinquencies: borrower["total_delinquencies"],
-          }
-        : raw["borrower_profile"],
-    risk_drivers: riskDriversObj,
-    model_version: raw["model_version"],
-    evidence:
-      raw["evidence"] ??
-      (raw["model_version"]
-        ? { "Model version": String(raw["model_version"]), Methodology: "PD × LGD × EAD" }
-        : undefined),
-    methodology: raw["methodology"] ?? {
-      PD: "SageMaker XGBoost scorecard",
+    probability_of_default: raw.pd,
+    decline_threshold: raw.decline_threshold,
+    loss_given_default: raw.lgd,
+    exposure_at_default: raw.ead,
+    expected_loss: raw.expected_loss,
+    risk_grade: raw.status,
+    borrower_profile: {
+      borrower_id: borrower.borrower_id,
+      name: borrower.name,
+      age: borrower.age,
+      annual_income:
+        borrower.monthly_income === null
+          ? undefined
+          : `$${(borrower.monthly_income * 12).toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`,
+      loan_amount:
+        borrower.outstanding_balance === null
+          ? undefined
+          : `$${borrower.outstanding_balance.toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`,
+      debt_to_income: borrower.debt_ratio.toFixed(3),
+      revolving_utilization: borrower.revolving_utilization,
+      loan_type: borrower.loan_type,
+      total_delinquencies: borrower.total_delinquencies,
+    },
+    risk_drivers: riskDrivers,
+    evidence: { "Model version": raw.model_version, Methodology: "PD × LGD × EAD" },
+    methodology: {
+      PD: "SageMaker model endpoint",
       LGD: "1 − recovery rate",
       "Expected loss": "PD × LGD × EAD",
     },
   };
-}
+};
 
-/**
- * Market risk assessment.
- * Real backend: GET /api/market/portfolios/{portfolio_id}/risk
- * The new UI sends { portfolio_id, confidence_level, lookback_days }.
- * We extract portfolio_id and make the correct GET request.
- */
-export const runMarketAnalysis = async <T = unknown>(
-  payload: Record<string, unknown>,
-): Promise<T> => {
-  const portfolioId = String(payload["portfolio_id"] ?? "")
-    .trim()
-    .toUpperCase();
+type BackendMarketResponse = {
+  portfolio_value: number;
+  annualized_volatility: number;
+  max_drawdown: number;
+  hhi: number;
+  max_position_weight: number;
+  weights: Record<string, number>;
+  correlation_matrix: Record<string, Record<string, number>>;
+  value_history: { date: string; value: number }[];
+  risk_drivers: string[];
+  confidence_level: number;
+  selected_var: number;
+  selected_expected_shortfall: number;
+};
+
+export type MarketResult = {
+  var: number;
+  var_confidence: string;
+  expected_shortfall: number;
+  volatility: number;
+  max_drawdown: number;
+  portfolio_value: number;
+  composition: { label: string; value: number }[];
+  history: { date: string; value: number }[];
+  concentration: Record<string, string>;
+  correlation: Record<string, Record<string, number>>;
+  risk_contributions: Record<string, string>;
+  explanation: Record<string, string> | undefined;
+};
+
+/** GET /api/market/portfolios/{portfolio_id}/risk. */
+export const runMarketAnalysis = async ({
+  portfolio_id,
+  confidence_level,
+  lookback_days,
+}: {
+  portfolio_id: string;
+  confidence_level: number;
+  lookback_days: number;
+}): Promise<MarketResult> => {
+  const portfolioId = portfolio_id.trim().toUpperCase();
   if (!portfolioId) throw new RiskoraApiError("portfolio_id is required", 400);
 
-  const confidenceLevel = Number(payload["confidence_level"] ?? 0.95);
-  const lookbackDays = Number(payload["lookback_days"] ?? 250);
   const query = new URLSearchParams({
-    confidence_level: String(confidenceLevel),
-    lookback_days: String(lookbackDays),
+    confidence_level: String(confidence_level),
+    lookback_days: String(lookback_days),
   });
-
-  const raw = await apiGet<Record<string, unknown>>(
+  const raw = await apiGet<BackendMarketResponse>(
     `/api/market/portfolios/${encodeURIComponent(portfolioId)}/risk?${query.toString()}`,
   );
 
-  return shapeMarketResponse(raw) as T;
+  return {
+    var: raw.selected_var,
+    var_confidence: `${(raw.confidence_level * 100).toFixed(1)}%, 1d`,
+    expected_shortfall: raw.selected_expected_shortfall,
+    volatility: raw.annualized_volatility,
+    max_drawdown: raw.max_drawdown,
+    portfolio_value: raw.portfolio_value,
+    composition: Object.entries(raw.weights).map(([label, weight]) => ({
+      label,
+      value: weight * raw.portfolio_value,
+    })),
+    history: raw.value_history,
+    concentration: {
+      "HHI (concentration)": raw.hhi.toFixed(4),
+      "Largest position weight": `${(raw.max_position_weight * 100).toFixed(1)}%`,
+    },
+    correlation: raw.correlation_matrix,
+    risk_contributions: Object.fromEntries(
+      Object.entries(raw.weights).map(([label, weight]) => [
+        label,
+        `${(weight * 100).toFixed(1)}%`,
+      ]),
+    ),
+    explanation: raw.risk_drivers.length
+      ? Object.fromEntries(raw.risk_drivers.map((driver, index) => [`Driver ${index + 1}`, driver]))
+      : undefined,
+  };
 };
 
-function shapeMarketResponse(raw: Record<string, unknown>): Record<string, unknown> {
-  // Convert weights dict { AAPL: 0.23, ... } to composition array [{ symbol, value }]
-  const composition =
-    raw["composition"] ??
-    raw["holdings"] ??
-    (raw["weights"] && typeof raw["weights"] === "object" && !Array.isArray(raw["weights"])
-      ? Object.entries(raw["weights"] as Record<string, number>).map(([symbol, weight]) => ({
-          symbol,
-          value: weight * Number(raw["portfolio_value"] ?? 0),
-        }))
-      : undefined);
+type BackendStressResponse = {
+  scenario_name: string;
+  equity_shock: number;
+  rate_shock_bps: number;
+  default_shock: number;
+  market_loss: number;
+  credit_loss: number;
+  combined_loss: number;
+  baseline_portfolio_value: number;
+  stressed_portfolio_value: number;
+  vulnerabilities: string[];
+};
 
-  // history can be value_history [{date, value}] or price_history
-  const history = raw["history"] ?? raw["value_history"] ?? raw["price_history"];
+export type StressResult = {
+  baseline_value: number;
+  stressed_value: number;
+  market_loss: number;
+  credit_loss: number;
+  total_loss: number;
+  loss_pct: number;
+  scenario_comparison: Record<string, string>;
+  explanation: Record<string, string> | undefined;
+};
 
-  // risk_drivers from real API is an array of strings; show as object for ResultBlock
-  const riskDriversRaw = raw["risk_drivers"];
-  const explanation =
-    raw["explanation"] ??
-    (Array.isArray(riskDriversRaw)
-      ? riskDriversRaw.reduce<Record<string, string>>((acc, d, i) => {
-          acc[`Driver ${i + 1}`] = String(d);
-          return acc;
-        }, {})
-      : riskDriversRaw);
-
-  return {
-    ...raw,
-    var: raw["selected_var"] ?? raw["historical_var_95"] ?? raw["var"],
-    var_confidence: raw["confidence_level"]
-      ? `${(Number(raw["confidence_level"]) * 100).toFixed(1)}%, 1d`
-      : "95%, 1d",
-    expected_shortfall:
-      raw["selected_expected_shortfall"] ??
-      raw["expected_shortfall_95"] ??
-      raw["expected_shortfall"],
-    volatility: raw["annualized_volatility"] ?? raw["volatility"],
-    max_drawdown: raw["max_drawdown"],
-    portfolio_value: raw["portfolio_value"],
-    composition,
-    history,
-    concentration: raw["concentration"] ?? {
-      "HHI (concentration)": String(Number(raw["hhi"] ?? 0).toFixed(4)),
-      "Largest position weight": `${(Number(raw["max_position_weight"] ?? 0) * 100).toFixed(1)}%`,
-    },
-    risk_contributions:
-      raw["risk_contributions"] ??
-      (raw["weights"]
-        ? Object.fromEntries(
-            Object.entries(raw["weights"] as Record<string, number>).map(([k, v]) => [
-              k,
-              `${(v * 100).toFixed(1)}%`,
-            ]),
-          )
-        : undefined),
-    explanation,
-    correlation: raw["correlation_matrix"] ?? raw["correlation"],
-  };
-}
-
-/**
- * Stress test.
- * Real backend: POST /api/stress/portfolios/{portfolio_id}/run
- * Body: { scenario_name, equity_shock, rate_shock_bps, default_shock }
- * The new UI sends { target_id, scenarios, equity_shock_pct, rate_shock_bps, default_rate_shock_pct }
- */
-export const runStressTest = async <T = unknown>(payload: Record<string, unknown>): Promise<T> => {
-  const portfolioId = String(payload["target_id"] ?? payload["portfolio_id"] ?? "")
-    .trim()
-    .toUpperCase();
+/** POST /api/stress/portfolios/{portfolio_id}/run. */
+export const runStressTest = async ({
+  target_id,
+  scenarios,
+  equity_shock_pct,
+  rate_shock_bps,
+  default_rate_shock_pct,
+}: {
+  target_id: string;
+  scenarios: string[];
+  equity_shock_pct: number;
+  rate_shock_bps: number;
+  default_rate_shock_pct: number;
+}): Promise<StressResult> => {
+  const portfolioId = target_id.trim().toUpperCase();
   if (!portfolioId) throw new RiskoraApiError("portfolio/target ID is required", 400);
-
-  const scenarios = Array.isArray(payload["scenarios"])
-    ? (payload["scenarios"] as string[])
-    : ["custom"];
 
   const body = {
     scenario_name: scenarios.join(", "),
-    equity_shock: Number(payload["equity_shock_pct"] ?? payload["equity_shock"] ?? -20) / 100,
-    rate_shock_bps: Number(payload["rate_shock_bps"] ?? 200),
-    default_shock: Number(payload["default_rate_shock_pct"] ?? payload["default_shock"] ?? 2) / 100,
+    equity_shock: equity_shock_pct / 100,
+    rate_shock_bps,
+    default_shock: default_rate_shock_pct / 100,
   };
-
-  const raw = await apiPost<Record<string, unknown>>(
+  const raw = await apiPost<BackendStressResponse>(
     `/api/stress/portfolios/${encodeURIComponent(portfolioId)}/run`,
     body,
   );
-
-  return shapeStressResponse(raw) as T;
-};
-
-function shapeStressResponse(raw: Record<string, unknown>): Record<string, unknown> {
-  const baseline = Number(raw["baseline_portfolio_value"] ?? 0);
-  const stressed = Number(raw["stressed_portfolio_value"] ?? 0);
-  const marketLoss = Number(raw["market_loss"] ?? 0);
-  const creditLoss = Number(raw["credit_loss"] ?? 0);
-  const combinedLoss = Number(raw["combined_loss"] ?? marketLoss + creditLoss);
-  const lossPct = baseline > 0 ? -(combinedLoss / baseline) : 0;
+  const baseline = raw.baseline_portfolio_value;
+  const stressed = raw.stressed_portfolio_value;
+  const combinedLoss = raw.combined_loss;
 
   return {
-    ...raw,
     baseline_value: baseline,
     stressed_value: stressed,
-    market_loss: marketLoss,
-    credit_loss: creditLoss,
+    market_loss: raw.market_loss,
+    credit_loss: raw.credit_loss,
     total_loss: combinedLoss,
-    loss_pct: lossPct,
-    scenario_comparison: raw["scenario_comparison"] ?? {
-      "Equity shock": `${(Number(raw["equity_shock"] ?? 0) * 100).toFixed(1)}%`,
-      "Rate shock (bps)": String(raw["rate_shock_bps"] ?? ""),
-      "Default-rate shock": `+${(Number(raw["default_shock"] ?? 0) * 100).toFixed(1)}%`,
+    loss_pct: baseline > 0 ? -(combinedLoss / baseline) : 0,
+    scenario_comparison: {
+      "Equity shock": `${(raw.equity_shock * 100).toFixed(1)}%`,
+      "Rate shock (bps)": String(raw.rate_shock_bps),
+      "Default-rate shock": `+${(raw.default_shock * 100).toFixed(1)}%`,
       "Baseline portfolio value": `$${baseline.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
       "Stressed portfolio value": `$${stressed.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
     },
-    explanation: raw["vulnerabilities"] ?? raw["explanation"],
+    explanation: raw.vulnerabilities.length
+      ? Object.fromEntries(
+          raw.vulnerabilities.map((item, index) => [`Vulnerability ${index + 1}`, item]),
+        )
+      : undefined,
   };
-}
-
-/**
- * AI analyst.
- * Real backend: POST /api/agent/ask  { question: string }
- * Returns: { answer: string, trace: [...] }
- */
-export const askAgent = async <T = unknown>(payload: Record<string, unknown>): Promise<T> => {
-  const raw = await apiPost<Record<string, unknown>>("/api/agent/ask", payload);
-  return shapeAgentResponse(raw) as T;
 };
 
-function shapeAgentResponse(raw: Record<string, unknown>): Record<string, unknown> {
+type BackendAgentResponse = {
+  answer: string;
+  trace: { tool: string; label: string; status: string }[];
+};
+
+export type AgentResponse = {
+  title: string;
+  answer: string;
+  trace: BackendAgentResponse["trace"];
+};
+
+/** POST /api/agent/ask. */
+export const askAgent = async ({ question }: { question: string }): Promise<AgentResponse> => {
+  const raw = await apiPost<BackendAgentResponse>("/api/agent/ask", { question });
   return {
-    ...raw,
-    // Backend returns { answer, trace }. UI expects { summary/answer, trace, title }
     title: "Riskora AI Analysis",
-    summary: raw["answer"] ?? raw["summary"],
-    answer: raw["answer"],
-    trace: raw["trace"],
-    evidence: undefined, // backend doesn't return separate evidence
-    methodology: undefined,
-    points: [],
-    recommendation: undefined,
+    answer: raw.answer,
+    trace: raw.trace,
   };
-}
+};

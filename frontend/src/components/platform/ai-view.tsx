@@ -1,72 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { SendHorizontal } from "lucide-react";
-import { askAgent, RiskoraApiError } from "@/lib/riskora-api";
+import { askAgent, RiskoraApiError, type AgentResponse } from "@/lib/riskora-api";
 import { ErrorState, Panel, ResultBlock } from "./ui";
 import { buttonClass, inputClass } from "./presentation";
 
-type AgentResponse = Record<string, unknown> & {
-  title?: string;
-  summary?: string;
-  points?: { label?: string; value?: string }[];
-  recommendation?: string;
-  answer?: string;
-  response?: string;
-  trace?: unknown;
-  evidence?: unknown;
-  methodology?: unknown;
-};
-
 function Answer({ data }: { data: AgentResponse }) {
-  const text = data.summary ?? data.answer ?? data.response;
-  const points = Array.isArray(data.points) ? data.points : [];
-  const evidence = Array.isArray(data.evidence) ? (data.evidence as unknown[]) : null;
-
   return (
     <div className="space-y-5 rounded-lg border border-hairline bg-forest p-5">
-      {data.title ? <h3 className="text-lg text-foreground">{data.title}</h3> : null}
-      {text ? (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{text}</p>
-      ) : null}
-
-      {points.length > 0 ? (
-        <ul className="space-y-2.5">
-          {points.map((p, i) => (
-            <li key={i} className="flex gap-3 text-sm leading-relaxed">
-              <span aria-hidden="true" className="mt-2 h-1 w-1 shrink-0 rounded-full bg-lime" />
-              <span className="text-foreground/90">
-                <span className="text-foreground">{p.label}</span>
-                {p.label && p.value ? " — " : ""}
-                <span className="num">{p.value}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {data.recommendation ? (
-        <p className="rounded-md border border-lime/30 bg-forest-raised p-4 text-sm leading-relaxed text-foreground/90">
-          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-lime">
-            Recommendation
-          </span>
-          <span className="mt-2 block">{data.recommendation}</span>
-        </p>
-      ) : null}
-
-      {evidence ? (
-        <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            Evidence sources
-          </p>
-          <ol className="mt-3 space-y-1.5">
-            {evidence.map((e, i) => (
-              <li key={i} className="flex gap-3 text-xs leading-relaxed text-muted-foreground">
-                <span className="num text-lime">{String(i + 1).padStart(2, "0")}</span>
-                <span>{String(e)}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
+      <h3 className="text-lg text-foreground">{data.title}</h3>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+        {data.answer}
+      </p>
     </div>
   );
 }
@@ -102,7 +46,7 @@ export function RiskoraAiView() {
     setError("");
     setLoading(true);
     try {
-      const data = await askAgent<AgentResponse>({ question });
+      const data = await askAgent({ question });
       setMessages((prev) => [...prev, { id: Date.now() + 1, role: "riskora", data }]);
     } catch (err) {
       setError(err instanceof RiskoraApiError ? err.message : "Unexpected error.");
@@ -160,16 +104,6 @@ export function RiskoraAiView() {
                   {m.data.trace ? (
                     <Panel title="Agent trace">
                       <ResultBlock data={m.data.trace} />
-                    </Panel>
-                  ) : null}
-                  {m.data.evidence && !Array.isArray(m.data.evidence) ? (
-                    <Panel title="Evidence">
-                      <ResultBlock data={m.data.evidence} />
-                    </Panel>
-                  ) : null}
-                  {m.data.methodology ? (
-                    <Panel title="Methodology">
-                      <ResultBlock data={m.data.methodology} />
                     </Panel>
                   ) : null}
                 </article>

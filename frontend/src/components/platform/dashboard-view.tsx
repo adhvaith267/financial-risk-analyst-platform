@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BarChart3, Bot, LineChart as LineIcon, RefreshCw, Waves } from "lucide-react";
-import { getDashboardSummary, RiskoraApiError } from "@/lib/riskora-api";
+import { getDashboardSummary, RiskoraApiError, type DashboardSummary } from "@/lib/riskora-api";
 import {
   BarRow,
   DataTable,
@@ -9,26 +9,10 @@ import {
   LoadingState,
   Metric,
   Panel,
-  ResultBlock,
   ViewHeader,
 } from "./ui";
 import type { PlatformView } from "./types";
 import { asMoney, asPct, ghostButtonClass } from "./presentation";
-
-type Driver = { name?: string; label?: string; contribution?: number; value?: number };
-
-type Summary = Record<string, unknown> & {
-  portfolio_value?: unknown;
-  total_exposure?: unknown;
-  high_risk_borrowers?: unknown;
-  var?: unknown;
-  var_confidence?: unknown;
-  expected_shortfall?: unknown;
-  annualized_volatility?: unknown;
-  max_drawdown?: unknown;
-  top_risk_drivers?: unknown;
-  recent_analyses?: unknown;
-};
 
 const show = (v: unknown) => (v === undefined || v === null || v === "" ? "—" : String(v));
 
@@ -39,52 +23,43 @@ const QUICK_ACTIONS: { view: PlatformView; label: string; icon: typeof BarChart3
   { view: "ai", label: "Riskora AI", icon: Bot },
 ];
 
-function Drivers({ data }: { data: unknown }) {
-  if (Array.isArray(data)) {
-    const rows = (data as Driver[]).map((d) => ({
-      name: d.name ?? d.label ?? "—",
-      contribution: Number(d.contribution ?? d.value ?? 0),
-    }));
-    const total = rows.reduce((a, r) => a + r.contribution, 0) || 1;
-    const max = Math.max(...rows.map((r) => r.contribution), 0.0001);
-    return (
-      <div className="divide-y divide-hairline/60">
-        {rows.map((r) => (
-          <BarRow
-            key={r.name}
-            label={r.name}
-            value={`${((r.contribution / total) * 100).toFixed(1)}% of portfolio risk`}
-            ratio={r.contribution / max}
-          />
-        ))}
-      </div>
-    );
-  }
-  if (data && typeof data === "object") return <ResultBlock data={data} />;
-  return <EmptyState label="No drivers returned." />;
+function Drivers({ data }: { data: DashboardSummary["top_risk_drivers"] }) {
+  if (data.length === 0) return <EmptyState label="No drivers returned." />;
+
+  const total = data.reduce((sum, driver) => sum + driver.contribution, 0) || 1;
+  const max = Math.max(...data.map((driver) => driver.contribution), 0.0001);
+  return (
+    <div className="divide-y divide-hairline/60">
+      {data.map((driver) => (
+        <BarRow
+          key={driver.name}
+          label={driver.name}
+          value={`${((driver.contribution / total) * 100).toFixed(1)}% of portfolio risk`}
+          ratio={driver.contribution / max}
+        />
+      ))}
+    </div>
+  );
 }
 
-function RecentAnalyses({ data }: { data: unknown }) {
-  if (Array.isArray(data) && data.length > 0) {
-    const rows = data as Record<string, unknown>[];
-    const keys = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
-    return (
-      <DataTable
-        columns={keys.map((k, i) => ({
-          key: k,
-          label: k.replace(/_/g, " "),
-          align: i === keys.length - 1 ? "right" : "left",
-        }))}
-        rows={rows}
-      />
-    );
-  }
-  if (data && typeof data === "object") return <ResultBlock data={data} />;
-  return <EmptyState label="No recent analyses." />;
+function RecentAnalyses({ data }: { data: DashboardSummary["recent_analyses"] }) {
+  if (data.length === 0) return <EmptyState label="No recent analyses." />;
+
+  const keys = Object.keys(data[0]);
+  return (
+    <DataTable
+      columns={keys.map((key, index) => ({
+        key,
+        label: key.replace(/_/g, " "),
+        align: index === keys.length - 1 ? "right" : "left",
+      }))}
+      rows={data}
+    />
+  );
 }
 
 export function DashboardView({ onNavigate }: { onNavigate: (view: PlatformView) => void }) {
-  const [data, setData] = useState<Summary | null>(null);
+  const [data, setData] = useState<DashboardSummary | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
@@ -92,7 +67,7 @@ export function DashboardView({ onNavigate }: { onNavigate: (view: PlatformView)
     setStatus("loading");
     setError("");
     try {
-      const result = await getDashboardSummary<Summary>();
+      const result = await getDashboardSummary();
       setData(result);
       setStatus("ready");
     } catch (err) {
@@ -105,7 +80,7 @@ export function DashboardView({ onNavigate }: { onNavigate: (view: PlatformView)
     void load();
   }, [load]);
 
-  const isEmpty = status === "ready" && (!data || Object.keys(data).length === 0);
+  const isEmpty = status === "ready" && !data;
 
   return (
     <div className="space-y-8">
@@ -130,15 +105,11 @@ export function DashboardView({ onNavigate }: { onNavigate: (view: PlatformView)
             <Metric label="Portfolio value" value={asMoney(data.portfolio_value)} />
             <Metric label="Total exposure" value={asMoney(data.total_exposure)} />
             <Metric label="High-risk borrowers" value={show(data.high_risk_borrowers)} />
-            <Metric
-              label="Value at risk"
-              value={asMoney(data.var ?? data["value_at_risk"])}
-              hint={data.var_confidence ? String(data.var_confidence) : undefined}
-            />
+            <Metric label="Value at risk" value={asMoney(data.var)} hint={data.var_confidence} />
             <Metric label="Expected shortfall" value={asMoney(data.expected_shortfall)} />
             <Metric label="Annualized volatility" value={asPct(data.annualized_volatility)} />
             <Metric label="Maximum drawdown" value={asPct(data.max_drawdown)} />
-            <Metric label="Signals monitored" value={show(data["signals_monitored"] ?? "—")} />
+            <Metric label="Signals monitored" value={show(data.signals_monitored)} />
           </div>
 
           <Panel title="Top risk drivers — share of portfolio risk">

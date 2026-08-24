@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Play } from "lucide-react";
-import { runStressTest, RiskoraApiError } from "@/lib/riskora-api";
+import { runStressTest, RiskoraApiError, type StressResult } from "@/lib/riskora-api";
 import {
   BarRow,
   EmptyState,
@@ -13,17 +13,6 @@ import {
   ViewHeader,
 } from "./ui";
 import { asMoney, asPct, buttonClass, inputClass } from "./presentation";
-
-type StressResult = Record<string, unknown> & {
-  baseline_value?: unknown;
-  stressed_value?: unknown;
-  market_loss?: unknown;
-  credit_loss?: unknown;
-  total_loss?: unknown;
-  loss_pct?: unknown;
-  scenario_comparison?: unknown;
-  explanation?: unknown;
-};
 
 const SCENARIOS = [
   { id: "recession", label: "Recession" },
@@ -103,7 +92,7 @@ export function StressTestingView() {
     setStatus("loading");
     setError("");
     try {
-      const data = await runStressTest<StressResult>({
+      const data = await runStressTest({
         target_id: targetId.trim(),
         scenarios: selected,
         equity_shock_pct: equityShock,
@@ -118,8 +107,8 @@ export function StressTestingView() {
     }
   }
 
-  const baseline = typeof result?.baseline_value === "number" ? result.baseline_value : undefined;
-  const stressed = typeof result?.stressed_value === "number" ? result.stressed_value : undefined;
+  const baseline = result?.baseline_value;
+  const stressed = result?.stressed_value;
 
   return (
     <div className="space-y-8">

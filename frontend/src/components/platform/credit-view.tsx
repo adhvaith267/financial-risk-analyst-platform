@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Play } from "lucide-react";
-import { runCreditAnalysis, RiskoraApiError } from "@/lib/riskora-api";
+import { runCreditAnalysis, RiskoraApiError, type CreditResult } from "@/lib/riskora-api";
 import {
   EmptyState,
   ErrorState,
@@ -13,19 +13,6 @@ import {
   ViewHeader,
 } from "./ui";
 import { asMoney, asPct, buttonClass, inputClass } from "./presentation";
-
-type CreditResult = Record<string, unknown> & {
-  probability_of_default?: unknown;
-  decline_threshold?: unknown;
-  loss_given_default?: unknown;
-  exposure_at_default?: unknown;
-  expected_loss?: unknown;
-  risk_grade?: unknown;
-  borrower_profile?: unknown;
-  risk_drivers?: unknown;
-  evidence?: unknown;
-  methodology?: unknown;
-};
 
 const show = (v: unknown) => (v === undefined || v === null || v === "" ? "—" : String(v));
 
@@ -47,10 +34,7 @@ export function CreditRiskView() {
     setStatus("loading");
     setError("");
     try {
-      const data = await runCreditAnalysis<CreditResult>({
-        borrower_id: borrowerId.trim(),
-        horizon_months: Number(horizon) || undefined,
-      });
+      const data = await runCreditAnalysis({ borrower_id: borrowerId.trim() });
       setResult(data);
       setStatus("ready");
     } catch (err) {
