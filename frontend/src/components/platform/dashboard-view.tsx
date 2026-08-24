@@ -11,11 +11,9 @@ import {
   Panel,
   ResultBlock,
   ViewHeader,
-  asMoney,
-  asPct,
-  ghostButtonClass,
 } from "./ui";
 import type { PlatformView } from "./types";
+import { asMoney, asPct, ghostButtonClass } from "./presentation";
 
 type Driver = { name?: string; label?: string; contribution?: number; value?: number };
 

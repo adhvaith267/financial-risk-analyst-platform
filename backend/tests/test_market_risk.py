@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from app.core.errors import PortfolioDataUnavailableError
 from app.engines.market_risk import _derive_risk_drivers, compute_market_risk
 
 
@@ -54,12 +55,14 @@ def test_risk_metrics_are_internally_consistent(prices, quantities):
     assert result.annualized_volatility > result.daily_volatility
     assert result.historical_var_95 > 0
     assert result.historical_var_99 >= result.historical_var_95  # deeper tail, larger loss
-    assert result.expected_shortfall_95 >= result.historical_var_95  # ES averages the tail beyond VaR
+    assert (
+        result.expected_shortfall_95 >= result.historical_var_95
+    )  # ES averages the tail beyond VaR
     assert result.max_drawdown <= 0
 
 
 def test_raises_on_unknown_portfolio_with_no_holdings():
-    with pytest.raises(ValueError):
+    with pytest.raises(PortfolioDataUnavailableError):
         compute_market_risk("EMPTY", pd.DataFrame(), pd.Series(dtype=float))
 
 
@@ -81,3 +84,35 @@ def test_risk_drivers_empty_when_diversified_and_uncorrelated():
     }
 
     assert _derive_risk_drivers(weights, correlation_matrix) == []
+
+
+def test_selected_confidence_and_lookback_are_returned(prices, quantities):
+    result = compute_market_risk(
+        "PTEST", prices, quantities, lookback_days=3, confidence_level=0.99
+    )
+
+    assert result.confidence_level == pytest.approx(0.99)
+    assert result.selected_var >= result.historical_var_95
+    assert result.selected_expected_shortfall >= result.selected_var
+
+
+def test_rejects_incomplete_price_history(prices, quantities):
+    incomplete = prices.copy()
+    incomplete.loc[incomplete.index[:3], "X"] = float("nan")
+
+    with pytest.raises(PortfolioDataUnavailableError, match="enough complete price history"):
+        compute_market_risk("PTEST", incomplete, quantities)
+
+
+def test_rejects_non_positive_portfolio_value(prices):
+    quantities = pd.Series({"X": -1.0, "CASH": 0.0})
+
+    with pytest.raises(PortfolioDataUnavailableError, match="positive priced value"):
+        compute_market_risk("PTEST", prices, quantities)
+
+
+def test_rejects_invalid_holdings(prices):
+    quantities = pd.Series({"X": float("nan"), "CASH": 1.0})
+
+    with pytest.raises(PortfolioDataUnavailableError, match="invalid holdings"):
+        compute_market_risk("PTEST", prices, quantities)

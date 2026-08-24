@@ -133,7 +133,10 @@ function Landing() {
 
             <dl className="mt-20 grid gap-10 border-t border-forest/15 pt-10 md:grid-cols-3 md:gap-0">
               {PRINCIPLES.map((p, i) => (
-                <div key={p.title} className={i > 0 ? "md:border-l md:border-forest/15 md:pl-10" : "md:pr-10"}>
+                <div
+                  key={p.title}
+                  className={i > 0 ? "md:border-l md:border-forest/15 md:pl-10" : "md:pr-10"}
+                >
                   <dt className="font-display text-2xl text-forest-deep">{p.title}</dt>
                   <dd className="mt-3 text-sm leading-relaxed text-forest/75">{p.copy}</dd>
                 </div>

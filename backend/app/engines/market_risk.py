@@ -2,9 +2,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.errors import PortfolioDataUnavailableError
 from app.models.market import MarketPrice, PortfolioHolding
 
 TRADING_DAYS_PER_YEAR = 252
@@ -37,17 +38,32 @@ class MarketRiskAssessment:
     correlation_matrix: dict[str, dict[str, float]]
     value_history: list[dict]
     risk_drivers: list[str]
+    confidence_level: float
+    selected_var: float
+    selected_expected_shortfall: float
 
 
 def load_portfolio_data(db: Session, portfolio_id: str) -> tuple[pd.DataFrame, pd.Series]:
     """Returns (prices, quantities): prices is a date x asset_id DataFrame of
-    close prices, quantities is asset_id -> held quantity (current snapshot).
+    close prices, quantities is asset_id -> held quantity from the latest
+    portfolio snapshot.
     """
+    latest_snapshot = db.scalar(
+        select(func.max(PortfolioHolding.as_of_date)).where(
+            PortfolioHolding.portfolio_id == portfolio_id
+        )
+    )
+    if latest_snapshot is None:
+        raise PortfolioDataUnavailableError(f"Portfolio {portfolio_id} has no holdings")
+
     holdings = db.scalars(
-        select(PortfolioHolding).where(PortfolioHolding.portfolio_id == portfolio_id)
+        select(PortfolioHolding).where(
+            PortfolioHolding.portfolio_id == portfolio_id,
+            PortfolioHolding.as_of_date == latest_snapshot,
+        )
     ).all()
     if not holdings:
-        raise ValueError(f"Portfolio {portfolio_id} has no holdings")
+        raise PortfolioDataUnavailableError(f"Portfolio {portfolio_id} has no holdings")
 
     quantities = pd.Series({h.asset_id: h.quantity for h in holdings})
 
@@ -56,14 +72,25 @@ def load_portfolio_data(db: Session, portfolio_id: str) -> tuple[pd.DataFrame, p
         .where(MarketPrice.asset_id.in_(quantities.index.tolist()))
         .order_by(MarketPrice.price_date)
     ).all()
-    prices = pd.DataFrame(rows, columns=["asset_id", "price_date", "close_price"]).pivot(
-        index="price_date", columns="asset_id", values="close_price"
-    ).sort_index()
+    prices = (
+        pd.DataFrame(rows, columns=["asset_id", "price_date", "close_price"])
+        .pivot(index="price_date", columns="asset_id", values="close_price")
+        .sort_index()
+    )
+
+    missing_assets = quantities.index.difference(prices.columns)
+    if len(missing_assets):
+        missing = ", ".join(str(asset) for asset in missing_assets)
+        raise PortfolioDataUnavailableError(
+            f"Portfolio {portfolio_id} has no price history for: {missing}"
+        )
 
     return prices, quantities
 
 
-def _derive_risk_drivers(weights: pd.Series, correlation_matrix: dict[str, dict[str, float]]) -> list[str]:
+def _derive_risk_drivers(
+    weights: pd.Series, correlation_matrix: dict[str, dict[str, float]]
+) -> list[str]:
     """Pure: plain-language labels for what's driving this portfolio's risk,
     derived only from data already computed above (weights, correlation) -
     not a separate model."""
@@ -71,7 +98,9 @@ def _derive_risk_drivers(weights: pd.Series, correlation_matrix: dict[str, dict[
 
     top_asset = weights.idxmax()
     if weights[top_asset] >= CONCENTRATION_THRESHOLD:
-        drivers.append(f"Concentrated position in {top_asset} ({weights[top_asset]:.0%} of portfolio)")
+        drivers.append(
+            f"Concentrated position in {top_asset} ({weights[top_asset]:.0%} of portfolio)"
+        )
 
     assets = list(weights.index)
     for i, asset_a in enumerate(assets):
@@ -84,23 +113,49 @@ def _derive_risk_drivers(weights: pd.Series, correlation_matrix: dict[str, dict[
 
 
 def compute_market_risk(
-    portfolio_id: str, prices: pd.DataFrame, quantities: pd.Series
+    portfolio_id: str,
+    prices: pd.DataFrame,
+    quantities: pd.Series,
+    *,
+    lookback_days: int = 250,
+    confidence_level: float = 0.95,
 ) -> MarketRiskAssessment:
     """Historical-simulation market risk: today's dollar weights applied to the
     portfolio's own historical daily returns. Pure function - no DB access -
     so it's directly unit-testable against a synthetic price history.
     """
-    prices = prices.dropna()
-    if len(prices) < 2:
-        raise ValueError("Need at least 2 days of price history to compute returns")
+    if not 0.90 <= confidence_level <= 0.999:
+        raise ValueError("confidence_level must be between 0.90 and 0.999")
+    if quantities.empty or not np.isfinite(quantities.to_numpy(dtype=float)).all():
+        raise PortfolioDataUnavailableError(f"Portfolio {portfolio_id} has invalid holdings")
 
-    portfolio_value_series = prices.mul(quantities, axis=1).sum(axis=1)
-    portfolio_value = float(portfolio_value_series.iloc[-1])
+    prices = (
+        prices.replace([np.inf, -np.inf], np.nan)
+        .reindex(columns=quantities.index)
+        .dropna()
+        .tail(lookback_days)
+    )
+    if len(prices) < 3:
+        raise PortfolioDataUnavailableError(
+            f"Portfolio {portfolio_id} does not have enough complete price history"
+        )
 
     returns = prices.pct_change().dropna()
 
     dollar_positions = prices.iloc[-1] * quantities
-    weights = dollar_positions / dollar_positions.sum()
+    portfolio_value = float(dollar_positions.sum())
+    if not np.isfinite(portfolio_value) or portfolio_value <= 0:
+        raise PortfolioDataUnavailableError(
+            f"Portfolio {portfolio_id} has no positive priced value"
+        )
+    weights = dollar_positions / portfolio_value
+    portfolio_value_series = prices.mul(quantities, axis=1).sum(axis=1)
+    if not np.isfinite(portfolio_value_series.to_numpy()).all() or (
+        portfolio_value_series <= 0
+    ).any():
+        raise PortfolioDataUnavailableError(
+            f"Portfolio {portfolio_id} has invalid historical priced values"
+        )
 
     portfolio_returns = returns.mul(weights, axis=1).sum(axis=1)
 
@@ -112,10 +167,21 @@ def compute_market_risk(
     historical_var_95 = -var_95_return * portfolio_value
     historical_var_99 = -var_99_return * portfolio_value
 
+    selected_var_return = float(np.percentile(portfolio_returns, (1 - confidence_level) * 100))
+    selected_var = -selected_var_return * portfolio_value
+    selected_tail_returns = portfolio_returns[portfolio_returns <= selected_var_return]
+    selected_expected_shortfall = (
+        float(-selected_tail_returns.mean() * portfolio_value)
+        if len(selected_tail_returns)
+        else selected_var
+    )
+
     parametric_var_95 = Z_SCORES[0.95] * daily_vol * portfolio_value
 
     tail_returns = portfolio_returns[portfolio_returns <= var_95_return]
-    expected_shortfall_95 = float(-tail_returns.mean() * portfolio_value) if len(tail_returns) else historical_var_95
+    expected_shortfall_95 = (
+        float(-tail_returns.mean() * portfolio_value) if len(tail_returns) else historical_var_95
+    )
 
     running_max = portfolio_value_series.cummax()
     drawdown = (portfolio_value_series - running_max) / running_max
@@ -158,9 +224,24 @@ def compute_market_risk(
         correlation_matrix=correlation_matrix,
         value_history=value_history,
         risk_drivers=risk_drivers,
+        confidence_level=confidence_level,
+        selected_var=selected_var,
+        selected_expected_shortfall=selected_expected_shortfall,
     )
 
 
-def assess_portfolio(db: Session, portfolio_id: str) -> MarketRiskAssessment:
+def assess_portfolio(
+    db: Session,
+    portfolio_id: str,
+    *,
+    lookback_days: int = 250,
+    confidence_level: float = 0.95,
+) -> MarketRiskAssessment:
     prices, quantities = load_portfolio_data(db, portfolio_id)
-    return compute_market_risk(portfolio_id, prices, quantities)
+    return compute_market_risk(
+        portfolio_id,
+        prices,
+        quantities,
+        lookback_days=lookback_days,
+        confidence_level=confidence_level,
+    )

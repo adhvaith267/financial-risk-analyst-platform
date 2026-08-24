@@ -18,7 +18,9 @@ class CreditAssessment:
     decline_threshold: float
 
 
-def assess_borrower(borrower: Borrower, loan: Loan | None = None, explain: bool = False) -> CreditAssessment:
+def assess_borrower(
+    borrower: Borrower, loan: Loan | None = None, explain: bool = False
+) -> CreditAssessment:
     """PD comes from the SageMaker model. LGD/EAD/EL are deterministic financial
     logic layered on top - the model never predicts a dollar amount directly.
     """

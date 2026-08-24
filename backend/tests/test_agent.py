@@ -45,10 +45,14 @@ def test_build_trace_orders_calls_and_fills_labels_from_args():
             content="",
             tool_calls=[{"name": "get_borrower", "args": {"borrower_id": "B102"}, "id": "call_1"}],
         ),
-        ToolMessage(content=json.dumps({"borrower_id": "B102"}), tool_call_id="call_1", status="success"),
+        ToolMessage(
+            content=json.dumps({"borrower_id": "B102"}), tool_call_id="call_1", status="success"
+        ),
         AIMessage(
             content="",
-            tool_calls=[{"name": "assess_credit_risk", "args": {"borrower_id": "B102"}, "id": "call_2"}],
+            tool_calls=[
+                {"name": "assess_credit_risk", "args": {"borrower_id": "B102"}, "id": "call_2"}
+            ],
         ),
         ToolMessage(content=json.dumps({"pd": 0.08}), tool_call_id="call_2", status="success"),
         AIMessage(content="Borrower B102 has elevated risk."),
@@ -73,7 +77,9 @@ def test_build_trace_flags_a_raised_tool_error():
 
     trace = _build_trace(messages)
 
-    assert trace == [{"tool": "get_borrower", "label": "Retrieved borrower B999", "status": "error"}]
+    assert trace == [
+        {"tool": "get_borrower", "label": "Retrieved borrower B999", "status": "error"}
+    ]
 
 
 def test_build_trace_flags_a_handled_json_error_even_with_ok_status():
@@ -86,13 +92,17 @@ def test_build_trace_flags_a_handled_json_error_even_with_ok_status():
             tool_calls=[{"name": "get_borrower", "args": {"borrower_id": "B999"}, "id": "call_1"}],
         ),
         ToolMessage(
-            content=json.dumps({"error": "Borrower B999 not found"}), tool_call_id="call_1", status="success"
+            content=json.dumps({"error": "Borrower B999 not found"}),
+            tool_call_id="call_1",
+            status="success",
         ),
     ]
 
     trace = _build_trace(messages)
 
-    assert trace == [{"tool": "get_borrower", "label": "Retrieved borrower B999", "status": "error"}]
+    assert trace == [
+        {"tool": "get_borrower", "label": "Retrieved borrower B999", "status": "error"}
+    ]
 
 
 def test_build_trace_falls_back_to_tool_name_for_unknown_tool_or_missing_args():

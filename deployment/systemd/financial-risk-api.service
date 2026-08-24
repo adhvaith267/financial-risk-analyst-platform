@@ -8,6 +8,7 @@ User=ec2-user
 WorkingDirectory=/var/www/financial-risk-analyst/backend
 # Load runtime environment variables from this file (never commit real secrets).
 EnvironmentFile=/etc/financial-risk-analyst/env
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/var/www/financial-risk-analyst/backend/.venv/bin/uvicorn \
     app.main:app \
     --host 127.0.0.1 \
@@ -16,6 +17,12 @@ ExecStart=/var/www/financial-risk-analyst/backend/.venv/bin/uvicorn \
     --log-level info
 Restart=on-failure
 RestartSec=5
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=financial-risk-api

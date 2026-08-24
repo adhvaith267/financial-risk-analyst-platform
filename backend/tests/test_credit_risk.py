@@ -29,8 +29,13 @@ def test_assess_borrower_computes_expected_loss(mock_get_client):
         "model_version": "gmsc-lgb-v1",
         "risk_drivers": ["High utilization", "Delinquency", "Debt burden"],
     }
-    loan = Loan(loan_id="L1", borrower_id="B102", loan_type="personal",
-                outstanding_balance=100_000.0, recovery_rate=0.60)
+    loan = Loan(
+        loan_id="L1",
+        borrower_id="B102",
+        loan_type="personal",
+        outstanding_balance=100_000.0,
+        recovery_rate=0.60,
+    )
 
     result = assess_borrower(_borrower(), loan)
 
@@ -60,13 +65,25 @@ def test_assess_borrower_without_loan_uses_default_recovery_rate_and_zero_ead(mo
 
 @patch("app.engines.credit_risk.get_pd_model_client")
 def test_assess_borrower_sends_exact_sagemaker_payload_shape(mock_get_client):
-    mock_get_client.return_value.predict.return_value = {"pd": 0.01, "status": "APPROVED", "model_version": "v1", "risk_drivers": []}
+    mock_get_client.return_value.predict.return_value = {
+        "pd": 0.01,
+        "status": "APPROVED",
+        "model_version": "v1",
+        "risk_drivers": [],
+    }
 
     assess_borrower(_borrower())
 
     sent_payload = mock_get_client.return_value.predict.call_args.args[0]
     assert set(sent_payload) == {
-        "RevolvingUtilizationOfUnsecuredLines", "age", "NumberOfTime30-59DaysPastDueNotWorse",
-        "DebtRatio", "MonthlyIncome", "NumberOfOpenCreditLinesAndLoans", "NumberOfTimes90DaysLate",
-        "NumberRealEstateLoansOrLines", "NumberOfTime60-89DaysPastDueNotWorse", "NumberOfDependents",
+        "RevolvingUtilizationOfUnsecuredLines",
+        "age",
+        "NumberOfTime30-59DaysPastDueNotWorse",
+        "DebtRatio",
+        "MonthlyIncome",
+        "NumberOfOpenCreditLinesAndLoans",
+        "NumberOfTimes90DaysLate",
+        "NumberRealEstateLoansOrLines",
+        "NumberOfTime60-89DaysPastDueNotWorse",
+        "NumberOfDependents",
     }

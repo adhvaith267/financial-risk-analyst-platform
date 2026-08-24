@@ -11,11 +11,8 @@ import {
   Panel,
   ResultBlock,
   ViewHeader,
-  asMoney,
-  asPct,
-  buttonClass,
-  inputClass,
 } from "./ui";
+import { asMoney, asPct, buttonClass, inputClass } from "./presentation";
 
 type StressResult = Record<string, unknown> & {
   baseline_value?: unknown;

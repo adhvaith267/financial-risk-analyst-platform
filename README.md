@@ -112,8 +112,6 @@ financial-risk-analyst-platform/
 │   │   │   └── sagemaker_client.py  # Thin boto3 wrapper for gmsc-pd-endpoint
 │   │   └── main.py             # FastAPI app, CORS middleware, router registration
 │   ├── alembic/                # DB migration scripts
-│   ├── scripts/
-│   │   └── seed_demo_data.py   # Loads borrowers from S3, creates demo portfolio
 │   ├── tests/                  # pytest test suite
 │   ├── pyproject.toml          # Python dependencies (managed with uv)
 │   └── .env.example            # Template for required environment variables
@@ -122,7 +120,8 @@ financial-risk-analyst-platform/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── platform/       # The five platform views and shared UI primitives
-│   │   │   │   ├── ui.tsx          # All hand-rolled UI: Panel, Metric, Gauge, charts…
+│   │   │   │   ├── ui.tsx          # Shared UI primitives and charts
+│   │   │   │   ├── presentation.ts # Shared formatting and control classes
 │   │   │   │   ├── dashboard-view.tsx
 │   │   │   │   ├── credit-view.tsx
 │   │   │   │   ├── market-view.tsx
@@ -142,7 +141,8 @@ financial-risk-analyst-platform/
 ├── deployment/
 │   ├── aws/
 │   │   ├── ec2-setup.sh        # Full provision script for a fresh Amazon Linux 2023 instance
-│   │   └── ec2-provision.sh    # Re-deploy script (pull + rebuild + restart)
+│   │   ├── ec2-provision.sh    # EC2/network provisioning script
+│   │   └── ec2-deploy.sh       # Repeatable application deployment script
 │   ├── nginx/
 │   │   └── financial-risk.conf # Nginx config (HTTP→HTTPS redirect, SPA, /api proxy)
 │   └── systemd/
@@ -454,7 +454,7 @@ There is no foreign key between portfolios and loans. The credit book (borrowers
 | RDS PostgreSQL 17 (db.t4g.micro) | Primary data store, private subnet |
 | SageMaker (ml.m5.xlarge) | Hosts the LightGBM PD model (`gmsc-pd-endpoint`) |
 | Amazon Bedrock | Hosts the LLM (`moonshot.kimi-k2-thinking`) per-request |
-| S3 | Stores ML model artifacts and the borrower seed CSV |
+| S3 | Stores ML model artifacts and approved ingestion inputs |
 | IAM | EC2 instance role (`FRA-EC2Role`) with least-privilege SageMaker + Bedrock access |
 
 ### Tooling
@@ -496,9 +496,6 @@ cp .env.example .env
 # Run database migrations
 uv run alembic upgrade head
 
-# Seed demo data (requires S3 access and a running SageMaker endpoint)
-uv run python scripts/seed_demo_data.py
-
 # Start the development server
 uv run uvicorn app.main:app --reload --port 8000
 # API available at http://localhost:8000
@@ -518,7 +515,7 @@ npm run dev
 # App available at http://localhost:5173
 ```
 
-The Vite dev server is configured to proxy all `/api/*` requests to `http://localhost:8000` (see `vite.config.ts`). You do not need Nginx locally.
+The Vite dev server is configured to proxy all `/api/*` requests to `http://localhost:8000` (see `vite.config.ts`). You do not need Nginx locally. The repository does not generate synthetic production records; load approved borrower, loan, portfolio, and market data through the system's data-ingestion process.
 
 ### Without a running backend
 
@@ -530,7 +527,18 @@ dependencies are visible to the analyst.
 
 ## Deployment (EC2)
 
-Full setup instructions are in `deployment/aws/ec2-setup.sh` (run once on a fresh instance) and `deployment/aws/ec2-provision.sh` (re-deploy after code changes).
+Full setup instructions are in `deployment/aws/ec2-setup.sh` (run once on a fresh instance), `deployment/aws/ec2-provision.sh` (network/instance provisioning), and `deployment/aws/ec2-deploy.sh` (repeatable application deployment). The provisioning script requires `SSH_CIDR` so port 22 is restricted to an administrator network.
+
+### Automated GitHub deployment
+
+`.github/workflows/cd.yml` deploys to EC2 only after the `CI` workflow succeeds on `main`. Configure these secrets in the GitHub `production` environment:
+
+- `EC2_HOST` — EC2 public hostname or Elastic IP
+- `EC2_USER` — normally `ec2-user`
+- `EC2_SSH_PRIVATE_KEY` — private key matching the EC2 key pair
+- `EC2_KNOWN_HOSTS` — pinned output from `ssh-keyscan` for the host
+
+The workflow uses a serialized production deployment, refuses a dirty EC2 checkout, applies migrations before restarting the API, and verifies both `/health` and `/ready`. Configure required reviewers on the `production` environment if live deployment approval is required.
 
 ### Quick re-deploy after a code change
 
@@ -540,8 +548,8 @@ ssh -i ~/.ssh/fra-dev-key.pem ec2-user@15.206.37.142
 
 cd /var/www/financial-risk-analyst
 
-# Pull latest code
-git pull origin main
+# Pull latest code (the setup script refuses to deploy over local changes)
+git pull --ff-only origin main
 
 # Rebuild frontend (if frontend changed)
 cd frontend && npm ci && npm run build
@@ -599,14 +607,33 @@ Copy `backend/.env.example` to `backend/.env` and fill in the required values. O
 | `DB_NAME` | No | `fra` | Database name |
 | `DB_USER` | No | `fra_admin` | Database user |
 | `DB_PASSWORD` | Yes | — | Database password |
+| `AUTH_ENABLED` | No | `true` | Enable bearer-token authentication |
+| `AUTH_USERNAME` | Yes if password login is enabled | — | Single platform account username |
+| `AUTH_PASSWORD_HASH` | Yes if password login is enabled | — | Argon2 password hash; never store the plaintext password |
+| `AUTH_SECRET_KEY` | Yes in production | — | Secret used to sign access tokens |
+| `AUTH_ROLE` | No | `analyst` | Account role (`analyst` or `admin`) |
+| `AUTH_TOKEN_EXPIRE_MINUTES` | No | `60` | Access-token lifetime |
+| `GOOGLE_AUTH_ENABLED` | No | `false` | Enable Google/Gmail OpenID Connect login |
+| `GOOGLE_CLIENT_ID` | Required when enabled | — | Google OAuth web-client ID |
+| `GOOGLE_CLIENT_SECRET` | Required when enabled | — | Google OAuth web-client secret |
+| `GOOGLE_REDIRECT_URI` | Required when enabled | local callback | Registered Google OAuth callback URL |
+| `GOOGLE_ALLOWED_EMAILS` | Required when enabled unless domains are set | — | Comma-separated exact Google accounts |
+| `GOOGLE_ALLOWED_EMAIL_DOMAINS` | Required when enabled unless emails are set | — | Comma-separated approved domains |
 | `AWS_REGION` | No | `ap-south-1` | AWS region for SageMaker and Bedrock |
 | `SAGEMAKER_ENDPOINT_NAME` | No | `gmsc-pd-endpoint` | SageMaker endpoint to invoke for PD |
 | `BEDROCK_MODEL_ID` | No | `moonshot.kimi-k2-thinking` | Bedrock model ID for the AI analyst |
 | `DEFAULT_RECOVERY_RATE` | No | `0.60` | Recovery rate assumption when a loan has no specific value |
 | `CREDIT_DECLINE_THRESHOLD` | No | `0.10` | PD above which a borrower is DECLINED |
-| `ALLOWED_ORIGINS` | No | `http://localhost:5173` | Comma-separated CORS origins (leave empty in production behind Nginx) |
+| `ALLOWED_ORIGINS` | No | empty | Comma-separated CORS origins (set explicitly for cross-origin development) |
 
 On EC2 with `FRA-EC2Role` attached, do not set `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY`. boto3 picks up the instance role automatically. For local dev, set `AWS_PROFILE=fra-dev` in your `.env`.
+
+Generate a password hash without storing the plaintext in the repository. Put the resulting value in `AUTH_PASSWORD_HASH` wrapped in single quotes because Argon2 hashes contain `$` characters:
+
+```bash
+cd backend
+uv run python -c "from app.auth import create_password_hash; print(create_password_hash('replace-this-password'))"
+```
 
 ---
 
@@ -629,7 +656,9 @@ uv run pytest
 uv run pytest --cov=app --cov-report=term-missing
 ```
 
-The test suite covers: credit risk engine (mocked SageMaker), market risk engine (synthetic price history), and stress test engine (deterministic shock calculations). The agent tests require a live Bedrock endpoint and are tagged to be skippable.
+The test suite covers: credit risk engine (isolated SageMaker contract), market risk engine (deterministic fixtures), stress test engine (deterministic shock calculations), and invalid dependency-response handling. External AWS calls are isolated in unit tests and are not used as production fallbacks.
+
+Every push and pull request runs the same backend Ruff/pytest gates and frontend TypeScript/ESLint/Prettier/Vite gates in GitHub Actions (`.github/workflows/ci.yml`).
 
 ---
 
@@ -688,7 +717,7 @@ The credit engine is tightly coupled to the exact feature schema (`to_pd_model_p
 The Kimi K2 Thinking model returns its chain-of-thought reasoning as inline `<think>...</think>` XML blocks in the response text, rather than in a separate content field. If the `_extract_text` function in `graph.py` did not strip those blocks, the user would see hundreds of lines of internal reasoning before the actual answer. Different Bedrock models handle this differently (some use a dedicated `reasoningContent` block, others use inline text), so the extraction logic needs to handle both and be updated when the model changes.
 
 **Database schema and ORM model drift**
-Alembic generates migrations by diffing the SQLAlchemy model definitions against the current database schema. If a column is added or renamed directly in the database (e.g., via a hotfix SQL statement) without a corresponding migration, subsequent `alembic upgrade head` runs will not fix the drift, and the ORM will either fail with a column error or silently ignore the mismatch. The project avoids this by using Alembic exclusively for schema changes, but without CI enforcement there is nothing stopping a direct SQL change.
+Alembic generates migrations by diffing the SQLAlchemy model definitions against the current database schema. If a column is added or renamed directly in the database (e.g., via a hotfix SQL statement) without a corresponding migration, subsequent `alembic upgrade head` runs will not fix the drift, and the ORM will either fail with a column error or silently ignore the mismatch. The project avoids this by using Alembic exclusively for schema changes. CI checks the application and migration code, but production still requires migrations to be reviewed and applied through the release process.
 
 **Nginx stripping the /api prefix before FastAPI sees it**
 The Nginx config uses `proxy_pass http://127.0.0.1:8000/;` (note the trailing slash), which causes Nginx to strip the `/api/` prefix before forwarding to FastAPI. FastAPI is configured with `root_path="/api"` to reconstruct the correct URL in OpenAPI docs and redirects. If the trailing slash were removed from the `proxy_pass` directive, FastAPI would receive requests with the `/api/` prefix still intact and all route matching would fail with 404s. This is a subtle Nginx configuration gotcha that is easy to accidentally change during an edit.

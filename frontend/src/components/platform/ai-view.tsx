@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { SendHorizontal } from "lucide-react";
 import { askAgent, RiskoraApiError } from "@/lib/riskora-api";
-import { ErrorState, Panel, ResultBlock, buttonClass, inputClass } from "./ui";
+import { ErrorState, Panel, ResultBlock } from "./ui";
+import { buttonClass, inputClass } from "./presentation";
 
 type AgentResponse = Record<string, unknown> & {
   title?: string;
@@ -71,8 +72,7 @@ function Answer({ data }: { data: AgentResponse }) {
 }
 
 type Message =
-  | { id: number; role: "user"; text: string }
-  | { id: number; role: "riskora"; data: AgentResponse };
+  { id: number; role: "user"; text: string } | { id: number; role: "riskora"; data: AgentResponse };
 
 const STARTERS = [
   "Assess borrower B1001 and explain the major factors driving the risk.",
@@ -157,12 +157,20 @@ export function RiskoraAiView() {
                     Riskora AI
                   </p>
                   <Answer data={m.data} />
-                  {m.data.trace ? <Panel title="Agent trace"><ResultBlock data={m.data.trace} /></Panel> : null}
+                  {m.data.trace ? (
+                    <Panel title="Agent trace">
+                      <ResultBlock data={m.data.trace} />
+                    </Panel>
+                  ) : null}
                   {m.data.evidence && !Array.isArray(m.data.evidence) ? (
-                    <Panel title="Evidence"><ResultBlock data={m.data.evidence} /></Panel>
+                    <Panel title="Evidence">
+                      <ResultBlock data={m.data.evidence} />
+                    </Panel>
                   ) : null}
                   {m.data.methodology ? (
-                    <Panel title="Methodology"><ResultBlock data={m.data.methodology} /></Panel>
+                    <Panel title="Methodology">
+                      <ResultBlock data={m.data.methodology} />
+                    </Panel>
                   ) : null}
                 </article>
               ),

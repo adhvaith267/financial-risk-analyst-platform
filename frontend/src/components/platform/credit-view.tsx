@@ -11,11 +11,8 @@ import {
   Panel,
   ResultBlock,
   ViewHeader,
-  asMoney,
-  asPct,
-  buttonClass,
-  inputClass,
 } from "./ui";
+import { asMoney, asPct, buttonClass, inputClass } from "./presentation";
 
 type CreditResult = Record<string, unknown> & {
   probability_of_default?: unknown;
@@ -62,7 +59,8 @@ export function CreditRiskView() {
     }
   }
 
-  const pd = typeof result?.probability_of_default === "number" ? result.probability_of_default : undefined;
+  const pd =
+    typeof result?.probability_of_default === "number" ? result.probability_of_default : undefined;
   const threshold =
     typeof result?.decline_threshold === "number" ? result.decline_threshold : undefined;
 
@@ -74,7 +72,10 @@ export function CreditRiskView() {
       />
 
       <Panel title="Analysis inputs">
-        <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-end">
+        <form
+          onSubmit={onSubmit}
+          className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem_auto] md:items-end"
+        >
           <Field label="Borrower / entity">
             <input
               className={inputClass}
@@ -137,7 +138,9 @@ export function CreditRiskView() {
                   />
                 </div>
               ) : (
-                <p className="num text-2xl text-foreground">{show(result.probability_of_default)}</p>
+                <p className="num text-2xl text-foreground">
+                  {show(result.probability_of_default)}
+                </p>
               )}
             </Panel>
           </div>

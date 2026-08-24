@@ -1,12 +1,15 @@
 import json
+from functools import lru_cache
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.config import Config as BotoConfig
+from botocore.exceptions import BotoCoreError
 
 from app.core.config import get_settings
+from app.core.errors import DependencyUnavailableError
 
 
-class PDModelUnavailableError(RuntimeError):
+class PDModelUnavailableError(DependencyUnavailableError):
     """Raised when the configured credit model cannot serve a prediction."""
 
 
@@ -22,7 +25,15 @@ class PDModelClient:
     def __init__(self) -> None:
         settings = get_settings()
         self._endpoint_name = settings.sagemaker_endpoint_name
-        self._client = boto3.client("sagemaker-runtime", region_name=settings.aws_region)
+        self._client = boto3.client(
+            "sagemaker-runtime",
+            region_name=settings.aws_region,
+            config=BotoConfig(
+                connect_timeout=5,
+                read_timeout=30,
+                retries={"max_attempts": 2, "mode": "standard"},
+            ),
+        )
 
     def predict(self, features: dict | list[dict], explain: bool = False) -> dict | list[dict]:
         """features: a single borrower dict, or a list for a batch request.
@@ -40,19 +51,34 @@ class PDModelClient:
                 Accept="application/json",
                 Body=json.dumps(payload),
             )
-            return json.loads(response["Body"].read())
-        except (BotoCoreError, ClientError, json.JSONDecodeError) as exc:
+            result = json.loads(response["Body"].read())
+            return _validate_prediction_shape(
+                result, expected_count=1 if isinstance(features, dict) else len(features)
+            )
+        except (BotoCoreError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise PDModelUnavailableError(
                 f"Credit model is unavailable: SageMaker endpoint '{self._endpoint_name}' "
                 "could not return a prediction."
             ) from exc
 
 
-_client: PDModelClient | None = None
+def _validate_prediction_shape(result: object, *, expected_count: int) -> dict | list[dict]:
+    if expected_count == 1 and isinstance(result, dict):
+        payloads = [result]
+    elif isinstance(result, list) and len(result) == expected_count:
+        payloads = result
+    else:
+        raise ValueError("PD model returned an unexpected response shape")
+
+    if not all(isinstance(payload, dict) for payload in payloads):
+        raise ValueError("PD model returned an invalid prediction payload")
+    for payload in payloads:
+        pd_value = payload.get("pd")
+        if not isinstance(pd_value, (int, float)) or not 0 <= pd_value <= 1:
+            raise ValueError("PD model returned an invalid probability")
+    return payloads[0] if expected_count == 1 else payloads
 
 
+@lru_cache
 def get_pd_model_client() -> PDModelClient:
-    global _client
-    if _client is None:
-        _client = PDModelClient()
-    return _client
+    return PDModelClient()

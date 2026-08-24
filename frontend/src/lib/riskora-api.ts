@@ -16,6 +16,8 @@
 
 const BASE =
   (import.meta.env["VITE_RISKORA_API_URL"] as string | undefined)?.replace(/\/$/, "") ?? "";
+const REQUEST_TIMEOUT_MS = 30_000;
+const ACCESS_TOKEN_KEY = "riskora_access_token";
 
 export class RiskoraApiError extends Error {
   status: number;
@@ -28,31 +30,54 @@ export class RiskoraApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const accessToken = sessionStorage.getItem(ACCESS_TOKEN_KEY);
   try {
     response = await fetch(`${BASE}${path}`, {
       ...init,
+      signal: controller.signal,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(init?.headers ?? {}),
       },
     });
-  } catch {
-    throw new RiskoraApiError(
-      "Riskora API is unavailable. Check the backend service and try again.",
-      0,
-    );
+  } catch (error) {
+    const message =
+      error instanceof DOMException && error.name === "AbortError"
+        ? "The request timed out. The service may be busy or unavailable."
+        : "Riskora API is unavailable. Check the backend service and try again.";
+    throw new RiskoraApiError(message, 0);
+  } finally {
+    window.clearTimeout(timeout);
   }
 
   if (!response.ok) {
+    if (response.status === 401) clearAccessToken();
     let detail = `Request failed with status ${response.status}.`;
     try {
-      const errBody = (await response.json()) as { detail?: string; message?: string };
-      detail = errBody.detail ?? errBody.message ?? detail;
+      const errBody = (await response.json()) as {
+        detail?: string | { msg?: string; loc?: unknown[] }[];
+        message?: string;
+        request_id?: string;
+      };
+      if (typeof errBody.detail === "string") {
+        detail = errBody.detail;
+      } else if (Array.isArray(errBody.detail)) {
+        detail = errBody.detail.map((item) => item.msg ?? "Invalid request").join("; ");
+      } else {
+        detail = errBody.message ?? detail;
+      }
+      if (errBody.request_id) detail = `${detail} (request ${errBody.request_id})`;
     } catch {
       /* response had no JSON body */
     }
     throw new RiskoraApiError(detail, response.status);
   }
+
+  if (response.status === 204) return undefined as T;
 
   try {
     return (await response.json()) as T;
@@ -63,6 +88,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 }
+
+export const hasAccessToken = () => Boolean(sessionStorage.getItem(ACCESS_TOKEN_KEY));
+
+export const clearAccessToken = () => sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+
+export const getCurrentUser = async () =>
+  request<{ username: string; role: string }>("/api/auth/me");
+
+export const logout = async () => {
+  clearAccessToken();
+  try {
+    await request<void>("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Local credentials are already cleared; an expired server cookie is harmless.
+  }
+};
+
+export const login = async (username: string, password: string): Promise<void> => {
+  const body = new URLSearchParams({ username, password });
+  const response = await request<{ access_token: string }>("/api/auth/token", {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+  sessionStorage.setItem(ACCESS_TOKEN_KEY, response.access_token);
+};
 
 const apiGet = <T>(path: string) => request<T>(path);
 
@@ -91,8 +142,7 @@ function shapeDashboardResponse(raw: Record<string, unknown>): Record<string, un
     annualized_volatility: raw["headline_annualized_volatility"] ?? raw["annualized_volatility"],
     max_drawdown: raw["headline_max_drawdown"] ?? raw["max_drawdown"],
     signals_monitored:
-      ((raw["borrower_count"] as number) ?? 0) +
-      ((raw["portfolio_count"] as number) ?? 0),
+      ((raw["borrower_count"] as number) ?? 0) + ((raw["portfolio_count"] as number) ?? 0),
     // top_risk_drivers: array of { driver, count } → remap to { name, contribution }
     top_risk_drivers: Array.isArray(raw["top_risk_drivers"])
       ? (raw["top_risk_drivers"] as Record<string, unknown>[]).map((d) => ({
@@ -114,7 +164,9 @@ function shapeDashboardResponse(raw: Record<string, unknown>): Record<string, un
 export const runCreditAnalysis = async <T = unknown>(
   payload: Record<string, unknown>,
 ): Promise<T> => {
-  const borrowerId = String(payload["borrower_id"] ?? "").trim().toUpperCase();
+  const borrowerId = String(payload["borrower_id"] ?? "")
+    .trim()
+    .toUpperCase();
   if (!borrowerId) throw new RiskoraApiError("borrower_id is required", 400);
 
   const raw = await apiGet<Record<string, unknown>>(
@@ -138,8 +190,8 @@ function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unkno
           return acc;
         }, {})
       : Array.isArray(riskDriversRaw) && riskDriversRaw.length === 0
-      ? undefined
-      : riskDriversRaw;
+        ? undefined
+        : riskDriversRaw;
 
   return {
     ...raw,
@@ -151,40 +203,42 @@ function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unkno
     expected_loss: raw["expected_loss"],
     risk_grade: raw["status"] ?? raw["risk_grade"],
     // Build borrower_profile from nested borrower object
-    borrower_profile: Object.keys(borrower).length > 0
-      ? {
-          borrower_id: borrower["borrower_id"],
-          name: borrower["name"],
-          age: borrower["age"],
-          annual_income: borrower["monthly_income"] != null
-            ? `$${(Number(borrower["monthly_income"]) * 12).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-            : undefined,
-          credit_score: borrower["credit_score"],
-          loan_amount: borrower["outstanding_balance"] != null
-            ? `$${Number(borrower["outstanding_balance"]).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-            : undefined,
-          debt_to_income: borrower["debt_ratio"] != null
-            ? String(Number(borrower["debt_ratio"]).toFixed(3))
-            : undefined,
-          revolving_utilization: borrower["revolving_utilization"],
-          loan_type: borrower["loan_type"],
-          total_delinquencies: borrower["total_delinquencies"],
-        }
-      : raw["borrower_profile"],
+    borrower_profile:
+      Object.keys(borrower).length > 0
+        ? {
+            borrower_id: borrower["borrower_id"],
+            name: borrower["name"],
+            age: borrower["age"],
+            annual_income:
+              borrower["monthly_income"] != null
+                ? `$${(Number(borrower["monthly_income"]) * 12).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : undefined,
+            credit_score: borrower["credit_score"],
+            loan_amount:
+              borrower["outstanding_balance"] != null
+                ? `$${Number(borrower["outstanding_balance"]).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : undefined,
+            debt_to_income:
+              borrower["debt_ratio"] != null
+                ? String(Number(borrower["debt_ratio"]).toFixed(3))
+                : undefined,
+            revolving_utilization: borrower["revolving_utilization"],
+            loan_type: borrower["loan_type"],
+            total_delinquencies: borrower["total_delinquencies"],
+          }
+        : raw["borrower_profile"],
     risk_drivers: riskDriversObj,
     model_version: raw["model_version"],
     evidence:
       raw["evidence"] ??
       (raw["model_version"]
-        ? { "Model version": String(raw["model_version"]), "Methodology": "PD × LGD × EAD" }
+        ? { "Model version": String(raw["model_version"]), Methodology: "PD × LGD × EAD" }
         : undefined),
-    methodology:
-      raw["methodology"] ??
-      {
-        PD: "SageMaker XGBoost scorecard",
-        LGD: "1 − recovery rate",
-        "Expected loss": "PD × LGD × EAD",
-      },
+    methodology: raw["methodology"] ?? {
+      PD: "SageMaker XGBoost scorecard",
+      LGD: "1 − recovery rate",
+      "Expected loss": "PD × LGD × EAD",
+    },
   };
 }
 
@@ -197,11 +251,20 @@ function shapeCreditResponse(raw: Record<string, unknown>): Record<string, unkno
 export const runMarketAnalysis = async <T = unknown>(
   payload: Record<string, unknown>,
 ): Promise<T> => {
-  const portfolioId = String(payload["portfolio_id"] ?? "").trim().toUpperCase();
+  const portfolioId = String(payload["portfolio_id"] ?? "")
+    .trim()
+    .toUpperCase();
   if (!portfolioId) throw new RiskoraApiError("portfolio_id is required", 400);
 
+  const confidenceLevel = Number(payload["confidence_level"] ?? 0.95);
+  const lookbackDays = Number(payload["lookback_days"] ?? 250);
+  const query = new URLSearchParams({
+    confidence_level: String(confidenceLevel),
+    lookback_days: String(lookbackDays),
+  });
+
   const raw = await apiGet<Record<string, unknown>>(
-    `/api/market/portfolios/${encodeURIComponent(portfolioId)}/risk`,
+    `/api/market/portfolios/${encodeURIComponent(portfolioId)}/risk?${query.toString()}`,
   );
 
   return shapeMarketResponse(raw) as T;
@@ -220,10 +283,7 @@ function shapeMarketResponse(raw: Record<string, unknown>): Record<string, unkno
       : undefined);
 
   // history can be value_history [{date, value}] or price_history
-  const history =
-    raw["history"] ??
-    raw["value_history"] ??
-    raw["price_history"];
+  const history = raw["history"] ?? raw["value_history"] ?? raw["price_history"];
 
   // risk_drivers from real API is an array of strings; show as object for ResultBlock
   const riskDriversRaw = raw["risk_drivers"];
@@ -238,9 +298,14 @@ function shapeMarketResponse(raw: Record<string, unknown>): Record<string, unkno
 
   return {
     ...raw,
-    var: raw["historical_var_95"] ?? raw["var"],
-    var_confidence: "95%, 1d",
-    expected_shortfall: raw["expected_shortfall_95"] ?? raw["expected_shortfall"],
+    var: raw["selected_var"] ?? raw["historical_var_95"] ?? raw["var"],
+    var_confidence: raw["confidence_level"]
+      ? `${(Number(raw["confidence_level"]) * 100).toFixed(1)}%, 1d`
+      : "95%, 1d",
+    expected_shortfall:
+      raw["selected_expected_shortfall"] ??
+      raw["expected_shortfall_95"] ??
+      raw["expected_shortfall"],
     volatility: raw["annualized_volatility"] ?? raw["volatility"],
     max_drawdown: raw["max_drawdown"],
     portfolio_value: raw["portfolio_value"],
@@ -250,7 +315,8 @@ function shapeMarketResponse(raw: Record<string, unknown>): Record<string, unkno
       "HHI (concentration)": String(Number(raw["hhi"] ?? 0).toFixed(4)),
       "Largest position weight": `${(Number(raw["max_position_weight"] ?? 0) * 100).toFixed(1)}%`,
     },
-    risk_contributions: raw["risk_contributions"] ??
+    risk_contributions:
+      raw["risk_contributions"] ??
       (raw["weights"]
         ? Object.fromEntries(
             Object.entries(raw["weights"] as Record<string, number>).map(([k, v]) => [
@@ -270,10 +336,10 @@ function shapeMarketResponse(raw: Record<string, unknown>): Record<string, unkno
  * Body: { scenario_name, equity_shock, rate_shock_bps, default_shock }
  * The new UI sends { target_id, scenarios, equity_shock_pct, rate_shock_bps, default_rate_shock_pct }
  */
-export const runStressTest = async <T = unknown>(
-  payload: Record<string, unknown>,
-): Promise<T> => {
-  const portfolioId = String(payload["target_id"] ?? payload["portfolio_id"] ?? "").trim().toUpperCase();
+export const runStressTest = async <T = unknown>(payload: Record<string, unknown>): Promise<T> => {
+  const portfolioId = String(payload["target_id"] ?? payload["portfolio_id"] ?? "")
+    .trim()
+    .toUpperCase();
   if (!portfolioId) throw new RiskoraApiError("portfolio/target ID is required", 400);
 
   const scenarios = Array.isArray(payload["scenarios"])
@@ -284,8 +350,7 @@ export const runStressTest = async <T = unknown>(
     scenario_name: scenarios.join(", "),
     equity_shock: Number(payload["equity_shock_pct"] ?? payload["equity_shock"] ?? -20) / 100,
     rate_shock_bps: Number(payload["rate_shock_bps"] ?? 200),
-    default_shock:
-      Number(payload["default_rate_shock_pct"] ?? payload["default_shock"] ?? 2) / 100,
+    default_shock: Number(payload["default_rate_shock_pct"] ?? payload["default_shock"] ?? 2) / 100,
   };
 
   const raw = await apiPost<Record<string, unknown>>(
@@ -313,9 +378,9 @@ function shapeStressResponse(raw: Record<string, unknown>): Record<string, unkno
     total_loss: combinedLoss,
     loss_pct: lossPct,
     scenario_comparison: raw["scenario_comparison"] ?? {
-      "Equity shock": `${((Number(raw["equity_shock"] ?? 0)) * 100).toFixed(1)}%`,
+      "Equity shock": `${(Number(raw["equity_shock"] ?? 0) * 100).toFixed(1)}%`,
       "Rate shock (bps)": String(raw["rate_shock_bps"] ?? ""),
-      "Default-rate shock": `+${((Number(raw["default_shock"] ?? 0)) * 100).toFixed(1)}%`,
+      "Default-rate shock": `+${(Number(raw["default_shock"] ?? 0) * 100).toFixed(1)}%`,
       "Baseline portfolio value": `$${baseline.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
       "Stressed portfolio value": `$${stressed.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
     },
@@ -328,9 +393,7 @@ function shapeStressResponse(raw: Record<string, unknown>): Record<string, unkno
  * Real backend: POST /api/agent/ask  { question: string }
  * Returns: { answer: string, trace: [...] }
  */
-export const askAgent = async <T = unknown>(
-  payload: Record<string, unknown>,
-): Promise<T> => {
+export const askAgent = async <T = unknown>(payload: Record<string, unknown>): Promise<T> => {
   const raw = await apiPost<Record<string, unknown>>("/api/agent/ask", payload);
   return shapeAgentResponse(raw) as T;
 };

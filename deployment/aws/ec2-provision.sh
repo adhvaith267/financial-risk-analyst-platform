@@ -4,6 +4,8 @@
 # Requires: aws CLI configured with the fra-dev profile.
 set -euo pipefail
 
+: "${SSH_CIDR:?Set SSH_CIDR to the administrator IP range, for example SSH_CIDR=203.0.113.10/32}"
+
 PROFILE=fra-dev
 REGION=ap-south-1
 VPC_ID=vpc-0284304629b3039a9
@@ -36,9 +38,9 @@ if [ "$APP_SG_ID" = "None" ] || [ -z "$APP_SG_ID" ]; then
         --protocol tcp --port 80   --cidr 0.0.0.0/0
     aws_ ec2 authorize-security-group-ingress --group-id "$APP_SG_ID" \
         --protocol tcp --port 443  --cidr 0.0.0.0/0
-    # SSH — restrict this to your own IP in production
+    # SSH — never expose administrative access to the whole internet.
     aws_ ec2 authorize-security-group-ingress --group-id "$APP_SG_ID" \
-        --protocol tcp --port 22   --cidr 0.0.0.0/0
+        --protocol tcp --port 22   --cidr "$SSH_CIDR"
 
     echo "Created security group: $APP_SG_ID"
 else

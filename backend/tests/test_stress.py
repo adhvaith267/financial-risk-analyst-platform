@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from app.core.errors import PortfolioDataUnavailableError
 from app.engines.stress import (
     StressScenario,
     apply_default_shock,
@@ -12,7 +13,9 @@ from app.models.borrower import Loan
 
 @pytest.fixture
 def scenario() -> StressScenario:
-    return StressScenario(name="recession", equity_shock=-0.20, rate_shock_bps=150.0, default_shock=0.30)
+    return StressScenario(
+        name="recession", equity_shock=-0.20, rate_shock_bps=150.0, default_shock=0.30
+    )
 
 
 def test_equity_shock_hits_equity_only(scenario):
@@ -20,7 +23,9 @@ def test_equity_shock_hits_equity_only(scenario):
     quantities = pd.Series({"AAPL": 10.0, "TLT": 10.0, "CASH": 1000.0})
     asset_classes = {"AAPL": "equity", "TLT": "bond", "CASH": "cash"}
 
-    market_loss, baseline, stressed = apply_market_shock(prices, quantities, asset_classes, scenario)
+    market_loss, baseline, stressed = apply_market_shock(
+        prices, quantities, asset_classes, scenario
+    )
 
     baseline_expected = 10 * 100 + 10 * 90 + 1000 * 1  # 2900
     assert baseline == pytest.approx(baseline_expected)
@@ -36,17 +41,41 @@ def test_equity_shock_hits_equity_only(scenario):
 def test_zero_shock_is_a_no_op():
     prices = pd.Series({"AAPL": 100.0})
     quantities = pd.Series({"AAPL": 10.0})
-    zero_scenario = StressScenario(name="none", equity_shock=0.0, rate_shock_bps=0.0, default_shock=0.0)
+    zero_scenario = StressScenario(
+        name="none", equity_shock=0.0, rate_shock_bps=0.0, default_shock=0.0
+    )
 
-    market_loss, baseline, stressed = apply_market_shock(prices, quantities, {"AAPL": "equity"}, zero_scenario)
+    market_loss, baseline, stressed = apply_market_shock(
+        prices, quantities, {"AAPL": "equity"}, zero_scenario
+    )
 
     assert market_loss == pytest.approx(0.0)
     assert baseline == pytest.approx(stressed)
 
 
+def test_market_shock_rejects_missing_prices():
+    with pytest.raises(PortfolioDataUnavailableError, match="incomplete priced positions"):
+        apply_market_shock(
+            pd.Series({"AAPL": 100.0}),
+            pd.Series({"AAPL": 10.0, "TLT": 10.0}),
+            {"AAPL": "equity", "TLT": "bond"},
+            StressScenario("missing", 0.0, 0.0, 0.0),
+        )
+
+
+def test_scenario_rejects_out_of_range_shocks():
+    with pytest.raises(ValueError, match="equity_shock"):
+        StressScenario("invalid", 0.1, 0.0, 0.0)
+
+
 def test_default_shock_increases_expected_loss(scenario):
-    loan = Loan(loan_id="L1", borrower_id="B1", loan_type="personal",
-                outstanding_balance=100_000.0, recovery_rate=0.60)
+    loan = Loan(
+        loan_id="L1",
+        borrower_id="B1",
+        loan_type="personal",
+        outstanding_balance=100_000.0,
+        recovery_rate=0.60,
+    )
     baseline_pds = [0.10]
 
     credit_loss, baseline_el, stressed_el = apply_default_shock([loan], baseline_pds, scenario)
@@ -63,9 +92,16 @@ def test_default_shock_increases_expected_loss(scenario):
 
 
 def test_default_shock_clips_pd_at_one():
-    loan = Loan(loan_id="L1", borrower_id="B1", loan_type="personal",
-                outstanding_balance=100_000.0, recovery_rate=0.50)
-    extreme_scenario = StressScenario(name="extreme", equity_shock=0.0, rate_shock_bps=0.0, default_shock=10.0)
+    loan = Loan(
+        loan_id="L1",
+        borrower_id="B1",
+        loan_type="personal",
+        outstanding_balance=100_000.0,
+        recovery_rate=0.50,
+    )
+    extreme_scenario = StressScenario(
+        name="extreme", equity_shock=0.0, rate_shock_bps=0.0, default_shock=10.0
+    )
 
     _, _, stressed_el = apply_default_shock([loan], [0.50], extreme_scenario)
 
@@ -74,7 +110,9 @@ def test_default_shock_clips_pd_at_one():
 
 
 def test_no_active_loans_means_zero_credit_loss():
-    credit_loss, baseline_el, stressed_el = apply_default_shock([], [], StressScenario("x", 0, 0, 0))
+    credit_loss, baseline_el, stressed_el = apply_default_shock(
+        [], [], StressScenario("x", 0, 0, 0)
+    )
     assert (credit_loss, baseline_el, stressed_el) == (0.0, 0.0, 0.0)
 
 
@@ -100,8 +138,17 @@ def test_derive_vulnerabilities_empty_when_diversified_and_unshocked():
     assets = ["AAPL", "MSFT", "JPM", "GOOG", "TLT", "CASH"]
     prices = pd.Series({a: 100.0 for a in assets})
     quantities = pd.Series({a: 1.0 for a in assets})
-    asset_classes = {"AAPL": "equity", "MSFT": "equity", "JPM": "equity", "GOOG": "equity", "TLT": "bond", "CASH": "cash"}
-    zero_scenario = StressScenario(name="none", equity_shock=0.0, rate_shock_bps=0.0, default_shock=0.0)
+    asset_classes = {
+        "AAPL": "equity",
+        "MSFT": "equity",
+        "JPM": "equity",
+        "GOOG": "equity",
+        "TLT": "bond",
+        "CASH": "cash",
+    }
+    zero_scenario = StressScenario(
+        name="none", equity_shock=0.0, rate_shock_bps=0.0, default_shock=0.0
+    )
 
     vulnerabilities = derive_vulnerabilities(prices, quantities, asset_classes, zero_scenario)
 

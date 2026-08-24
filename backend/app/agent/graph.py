@@ -2,6 +2,7 @@ import json
 import re
 from functools import lru_cache
 
+from botocore.exceptions import BotoCoreError
 from langchain_aws import ChatBedrockConverse
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph.state import CompiledStateGraph
@@ -9,6 +10,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app.agent.tools import build_tools
 from app.core.config import get_settings
+from app.core.errors import AgentUnavailableError
 
 # Human-readable label templates for each tool, filled in from that call's
 # arguments. Falls back to the raw tool name for anything not listed here.
@@ -130,7 +132,10 @@ def _build_trace(messages: list) -> list[dict]:
 
 def ask(question: str) -> tuple[str, list[dict]]:
     agent = build_agent()
-    result = agent.invoke({"messages": [("user", question)]})
+    try:
+        result = agent.invoke({"messages": [("user", question)]})
+    except (BotoCoreError, TimeoutError) as exc:
+        raise AgentUnavailableError("The AI analysis service is temporarily unavailable.") from exc
     answer = _extract_text(result["messages"][-1].content)
     trace = _build_trace(result["messages"])
     return answer, trace

@@ -42,7 +42,15 @@ export function Panel({
   );
 }
 
-export function Metric({ label, value, hint }: { label: string; value: ReactNode; hint?: string | undefined }) {
+export function Metric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: string | undefined;
+}) {
   return (
     <div className="rounded-lg border border-hairline bg-forest p-4">
       <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -107,15 +115,6 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
-export const inputClass =
-  "w-full rounded-md border border-input bg-forest-deep px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
-
-export const buttonClass =
-  "inline-flex items-center gap-2 rounded-md bg-lime px-4 py-2 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px disabled:pointer-events-none disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
-
-export const ghostButtonClass =
-  "inline-flex items-center gap-2 rounded-md border border-hairline-strong px-4 py-2 text-sm text-foreground transition-colors hover:bg-forest-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
-
 /** Renders whatever shape the backend returns, without inventing values. */
 export function ResultBlock({ data }: { data: unknown }) {
   if (data === null || data === undefined) return null;
@@ -131,33 +130,13 @@ export function ResultBlock({ data }: { data: unknown }) {
             {key.replace(/_/g, " ")}
           </dt>
           <dd className="num max-w-[60%] break-words text-right text-sm text-foreground">
-            {typeof value === "object" && value !== null
-              ? JSON.stringify(value)
-              : String(value)}
+            {typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}
           </dd>
         </div>
       ))}
     </dl>
   );
 }
-
-/* ---------- formatting helpers ---------- */
-
-export const money = (n: number, digits = 2) =>
-  n.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-
-export const pct = (n: number, digits = 2) => `${(n * 100).toFixed(digits)}%`;
-
-export const numOr = (v: unknown, fallback = 0) =>
-  typeof v === "number" && Number.isFinite(v) ? v : fallback;
-
-export const asMoney = (v: unknown) => (typeof v === "number" ? money(v) : v === undefined || v === null ? "—" : String(v));
-export const asPct = (v: unknown, d = 2) => (typeof v === "number" ? pct(v, d) : v === undefined || v === null ? "—" : String(v));
 
 /* ---------- charts ---------- */
 
@@ -185,7 +164,8 @@ export function BarRow({
           className="h-full rounded-full"
           style={{
             width: `${width}%`,
-            background: tone === "lime" ? "var(--lime)" : "color-mix(in oklch, var(--lime) 45%, transparent)",
+            background:
+              tone === "lime" ? "var(--lime)" : "color-mix(in oklch, var(--lime) 45%, transparent)",
           }}
         />
       </div>
@@ -282,7 +262,10 @@ export function LineChart({
   const span = max - min || 1;
   const y = (v: number) => 100 - ((v - min) / span) * 100;
   const d = points
-    .map((v, i) => `${i === 0 ? "M" : "L"}${((i / (points.length - 1)) * 100).toFixed(2)} ${y(v).toFixed(2)}`)
+    .map(
+      (v, i) =>
+        `${i === 0 ? "M" : "L"}${((i / (points.length - 1)) * 100).toFixed(2)} ${y(v).toFixed(2)}`,
+    )
     .join(" ");
   const area = `${d} L100 100 L0 100 Z`;
 
@@ -290,7 +273,13 @@ export function LineChart({
     <div className="relative">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-56 w-full">
         <path d={area} fill="color-mix(in oklch, var(--lime) 12%, transparent)" />
-        <path d={d} fill="none" stroke="var(--lime)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        <path
+          d={d}
+          fill="none"
+          stroke="var(--lime)"
+          strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
+        />
         {threshold !== undefined ? (
           <line
             x1="0"

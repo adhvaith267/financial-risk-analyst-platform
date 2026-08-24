@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.auth import require_roles
 from app.core.db import get_db
 from app.engines.market_risk import assess_portfolio
 from app.models.borrower import Borrower, Loan
@@ -11,7 +12,11 @@ from app.models.market import Portfolio
 from app.models.risk import RiskResult, StressResult
 from app.schemas.dashboard import DashboardSummary, RecentAnalysis, RiskDriverFrequency
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["dashboard"],
+    dependencies=[Depends(require_roles("analyst", "admin"))],
+)
 
 # How many recent credit assessments to scan when aggregating "top risk
 # drivers" - a rolling window, not the full history.
@@ -26,13 +31,15 @@ def summary(db: Session = Depends(get_db)) -> DashboardSummary:
     portfolio_count = db.scalar(select(func.count()).select_from(Portfolio)) or 0
     stress_test_count = db.scalar(select(func.count()).select_from(StressResult)) or 0
 
-    total_exposure = db.scalar(
-        select(func.sum(Loan.outstanding_balance)).where(Loan.status == "active")
-    ) or 0.0
+    total_exposure = (
+        db.scalar(select(func.sum(Loan.outstanding_balance)).where(Loan.status == "active")) or 0.0
+    )
 
     # Sum every portfolio's current market value; separately track the
     # headline (first) portfolio's full risk metrics for the KPI row.
-    portfolio_ids = db.scalars(select(Portfolio.portfolio_id).order_by(Portfolio.portfolio_id)).all()
+    portfolio_ids = db.scalars(
+        select(Portfolio.portfolio_id).order_by(Portfolio.portfolio_id)
+    ).all()
     total_portfolio_value = 0.0
     headline_portfolio_id = portfolio_ids[0] if portfolio_ids else None
     headline_annualized_volatility = None
@@ -40,10 +47,7 @@ def summary(db: Session = Depends(get_db)) -> DashboardSummary:
     headline_expected_shortfall_95 = None
     headline_max_drawdown = None
     for portfolio_id in portfolio_ids:
-        try:
-            result = assess_portfolio(db, portfolio_id)
-        except ValueError:
-            continue
+        result = assess_portfolio(db, portfolio_id)
         total_portfolio_value += result.portfolio_value
         if portfolio_id == headline_portfolio_id:
             headline_annualized_volatility = result.annualized_volatility
@@ -91,7 +95,8 @@ def summary(db: Session = Depends(get_db)) -> DashboardSummary:
             entity_type=row.entity_type,
             entity_id=row.entity_id,
             risk_type=row.risk_type,
-            label=row.payload.get("status") or ("Elevated" if row.risk_type == "market" else "Computed"),
+            label=row.payload.get("status")
+            or ("Elevated" if row.risk_type == "market" else "Computed"),
             computed_at=str(row.computed_at),
         )
         for row in recent_risk_results

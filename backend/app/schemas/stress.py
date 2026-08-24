@@ -1,11 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class StressScenarioRequest(BaseModel):
-    scenario_name: str = "custom"
-    equity_shock: float = -0.20
-    rate_shock_bps: float = 150.0
-    default_shock: float = 0.30
+    scenario_name: str = Field(default="custom", min_length=1, max_length=100)
+    equity_shock: float = Field(default=-0.20, ge=-1.0, le=0.0)
+    rate_shock_bps: float = Field(default=150.0, ge=-1000.0, le=2000.0)
+    default_shock: float = Field(default=0.30, ge=0.0, le=10.0)
 
 
 class StressResultResponse(BaseModel):

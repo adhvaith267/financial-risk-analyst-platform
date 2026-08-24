@@ -8,7 +8,9 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.1",

@@ -12,11 +12,8 @@ import {
   Panel,
   ResultBlock,
   ViewHeader,
-  asMoney,
-  asPct,
-  buttonClass,
-  inputClass,
 } from "./ui";
+import { asMoney, asPct, buttonClass, inputClass } from "./presentation";
 
 type MarketResult = Record<string, unknown> & {
   var?: unknown;
@@ -103,7 +100,10 @@ export function MarketRiskView() {
       />
 
       <Panel title="Analysis controls">
-        <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem_10rem_auto] md:items-end">
+        <form
+          onSubmit={onSubmit}
+          className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem_10rem_auto] md:items-end"
+        >
           <Field label="Portfolio">
             <input
               className={inputClass}
@@ -185,14 +185,14 @@ export function MarketRiskView() {
               )}
             </Panel>
             <Panel title="Concentration / correlation">
-              {result.concentration ?? result.correlation ? (
+              {(result.concentration ?? result.correlation) ? (
                 <ResultBlock data={result.concentration ?? result.correlation} />
               ) : (
                 <EmptyState label="No concentration data returned." />
               )}
             </Panel>
             <Panel title="Evidence and explanation">
-              {result.evidence ?? result.explanation ? (
+              {(result.evidence ?? result.explanation) ? (
                 <ResultBlock data={result.evidence ?? result.explanation} />
               ) : (
                 <EmptyState label="No explanation returned." />

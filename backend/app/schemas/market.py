@@ -18,6 +18,9 @@ class MarketRiskResponse(BaseModel):
     correlation_matrix: dict[str, dict[str, float]]
     value_history: list[dict]
     risk_drivers: list[str]
+    confidence_level: float
+    selected_var: float
+    selected_expected_shortfall: float
 
 
 class PortfolioSummary(BaseModel):

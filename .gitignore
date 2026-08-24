@@ -17,6 +17,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+.coverage
 .mypy_cache/
 
 # ── Node / frontend ─────────────────────────────────────────────────────────

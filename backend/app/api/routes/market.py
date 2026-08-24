@@ -1,14 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import require_roles
 from app.core.db import get_db
+from app.core.identifiers import normalize_identifier
 from app.engines.market_risk import assess_portfolio
 from app.models.market import Portfolio
 from app.models.risk import RiskResult
 from app.schemas.market import MarketRiskResponse, PortfolioSummary
 
-router = APIRouter(prefix="/market", tags=["market"])
+router = APIRouter(
+    prefix="/market",
+    tags=["market"],
+    dependencies=[Depends(require_roles("analyst", "admin"))],
+)
 
 
 @router.get("/portfolios", response_model=list[PortfolioSummary])
@@ -18,11 +24,19 @@ def list_portfolios(db: Session = Depends(get_db)) -> list[PortfolioSummary]:
 
 
 @router.get("/portfolios/{portfolio_id}/risk", response_model=MarketRiskResponse)
-def risk(portfolio_id: str, db: Session = Depends(get_db)) -> MarketRiskResponse:
-    try:
-        result = assess_portfolio(db, portfolio_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+def risk(
+    portfolio_id: str,
+    lookback_days: int = Query(default=250, ge=30, le=2520),
+    confidence_level: float = Query(default=0.95, ge=0.90, le=0.999),
+    db: Session = Depends(get_db),
+) -> MarketRiskResponse:
+    portfolio_id = normalize_identifier(portfolio_id, "portfolio_id")
+    result = assess_portfolio(
+        db,
+        portfolio_id,
+        lookback_days=lookback_days,
+        confidence_level=confidence_level,
+    )
 
     db.add(
         RiskResult(
@@ -35,6 +49,9 @@ def risk(portfolio_id: str, db: Session = Depends(get_db)) -> MarketRiskResponse
                 "expected_shortfall_95": result.expected_shortfall_95,
                 "max_drawdown": result.max_drawdown,
                 "hhi": result.hhi,
+                "confidence_level": result.confidence_level,
+                "selected_var": result.selected_var,
+                "selected_expected_shortfall": result.selected_expected_shortfall,
             },
         )
     )

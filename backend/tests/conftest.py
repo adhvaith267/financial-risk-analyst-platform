@@ -4,3 +4,4 @@ import os
 # (Borrower/Loan are plain SQLAlchemy models instantiated in-memory here).
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PASSWORD", "test")
+os.environ.setdefault("APP_ENV", "test")

@@ -1,19 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import require_roles
 from app.core.db import get_db
+from app.core.errors import ResourceNotFoundError
+from app.core.identifiers import normalize_identifier
 from app.engines.credit_risk import assess_borrower
 from app.models.borrower import Borrower, Loan
 from app.models.risk import RiskResult
-from app.services.sagemaker_client import PDModelUnavailableError
 from app.schemas.credit import (
     BorrowerProfile,
     BorrowerSummary,
     CreditAssessmentResponse,
 )
 
-router = APIRouter(prefix="/credit", tags=["credit"])
+router = APIRouter(
+    prefix="/credit",
+    tags=["credit"],
+    dependencies=[Depends(require_roles("analyst", "admin"))],
+)
 
 
 @router.get("/borrowers", response_model=list[BorrowerSummary])
@@ -33,19 +39,19 @@ def list_borrowers(db: Session = Depends(get_db)) -> list[BorrowerSummary]:
 
 
 @router.get("/borrowers/{borrower_id}/assess", response_model=CreditAssessmentResponse)
-def assess(borrower_id: str, explain: bool = False, db: Session = Depends(get_db)) -> CreditAssessmentResponse:
+def assess(
+    borrower_id: str, explain: bool = False, db: Session = Depends(get_db)
+) -> CreditAssessmentResponse:
+    borrower_id = normalize_identifier(borrower_id, "borrower_id")
     borrower = db.get(Borrower, borrower_id)
     if borrower is None:
-        raise HTTPException(status_code=404, detail=f"Borrower {borrower_id} not found")
+        raise ResourceNotFoundError(f"Borrower {borrower_id} not found")
 
     loan = db.scalars(
         select(Loan).where(Loan.borrower_id == borrower_id, Loan.status == "active").limit(1)
     ).first()
 
-    try:
-        result = assess_borrower(borrower, loan, explain=explain)
-    except PDModelUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    result = assess_borrower(borrower, loan, explain=explain)
 
     db.add(
         RiskResult(

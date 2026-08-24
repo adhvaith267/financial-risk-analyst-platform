@@ -32,9 +32,13 @@ sudo mkdir -p "$APP_DIR"
 sudo chown ec2-user:ec2-user "$APP_DIR"
 
 if [ -d "$APP_DIR/.git" ]; then
+    if [ -n "$(git -C "$APP_DIR" status --porcelain)" ]; then
+        echo "Refusing to deploy over a dirty working tree: $APP_DIR" >&2
+        exit 1
+    fi
     git -C "$APP_DIR" fetch origin
-    git -C "$APP_DIR" checkout "$DEPLOY_BRANCH"
-    git -C "$APP_DIR" pull origin "$DEPLOY_BRANCH"
+    git -C "$APP_DIR" checkout --quiet "$DEPLOY_BRANCH"
+    git -C "$APP_DIR" pull --ff-only origin "$DEPLOY_BRANCH"
 else
     git clone --branch "$DEPLOY_BRANCH" "$REPO_URL" "$APP_DIR"
 fi
@@ -42,7 +46,7 @@ fi
 # ── 3. Backend Python environment ─────────────────────────────────────────────
 echo "==> Setting up Python backend..."
 cd "$APP_DIR/backend"
-uv sync --no-dev
+uv sync --locked --no-dev
 
 # ── 4. Environment variables ───────────────────────────────────────────────────
 echo "==> Configuring environment..."
@@ -81,14 +85,23 @@ echo "==> Installing systemd service..."
 sudo cp "$APP_DIR/deployment/systemd/financial-risk-api.service" "$SYSTEMD_UNIT"
 sudo systemctl daemon-reload
 sudo systemctl enable financial-risk-api
-sudo systemctl restart financial-risk-api
 
 # ── 8. Database migrations ────────────────────────────────────────────────────
 echo "==> Running Alembic migrations..."
 cd "$APP_DIR/backend"
 # Source the env file so alembic can reach the DB
 set -a && source "$ENV_FILE" && set +a
+: "${DB_HOST:?Set DB_HOST in $ENV_FILE}"
+: "${DB_PASSWORD:?Set DB_PASSWORD in $ENV_FILE}"
+if [ "${APP_ENV:-development}" = "production" ]; then
+    : "${AUTH_SECRET_KEY:?Set AUTH_SECRET_KEY in $ENV_FILE}"
+    if [ "${GOOGLE_AUTH_ENABLED:-false}" != "true" ]; then
+        : "${AUTH_USERNAME:?Set AUTH_USERNAME in $ENV_FILE}"
+        : "${AUTH_PASSWORD_HASH:?Set AUTH_PASSWORD_HASH in $ENV_FILE}"
+    fi
+fi
 uv run alembic upgrade head
+sudo systemctl restart financial-risk-api
 
 # ── 9. Smoke test ─────────────────────────────────────────────────────────────
 echo "==> Smoke test..."

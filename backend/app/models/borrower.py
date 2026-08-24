@@ -36,13 +36,17 @@ class Borrower(Base):
         return {
             "RevolvingUtilizationOfUnsecuredLines": self.revolving_utilization_of_unsecured_lines,
             "age": self.age,
-            "NumberOfTime30-59DaysPastDueNotWorse": self.number_of_time_30_59_days_past_due_not_worse,
+            "NumberOfTime30-59DaysPastDueNotWorse": (
+                self.number_of_time_30_59_days_past_due_not_worse
+            ),
             "DebtRatio": self.debt_ratio,
             "MonthlyIncome": self.monthly_income,
             "NumberOfOpenCreditLinesAndLoans": self.number_of_open_credit_lines_and_loans,
             "NumberOfTimes90DaysLate": self.number_of_times_90_days_late,
             "NumberRealEstateLoansOrLines": self.number_real_estate_loans_or_lines,
-            "NumberOfTime60-89DaysPastDueNotWorse": self.number_of_time_60_89_days_past_due_not_worse,
+            "NumberOfTime60-89DaysPastDueNotWorse": (
+                self.number_of_time_60_89_days_past_due_not_worse
+            ),
             "NumberOfDependents": self.number_of_dependents,
         }
 
@@ -51,7 +55,9 @@ class Loan(Base):
     __tablename__ = "loans"
 
     loan_id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    borrower_id: Mapped[str] = mapped_column(ForeignKey("borrowers.borrower_id"))
+    borrower_id: Mapped[str] = mapped_column(
+        ForeignKey("borrowers.borrower_id"), index=True
+    )
     loan_type: Mapped[str] = mapped_column(String(50))
 
     # EAD (Exposure at Default) approximation for the MVP: EAD ~= outstanding_balance.
@@ -60,7 +66,7 @@ class Loan(Base):
     recovery_rate: Mapped[float] = mapped_column(Float, default=0.60)
 
     origination_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="active")
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
 
     borrower: Mapped["Borrower"] = relationship(back_populates="loans")
     payments: Mapped[list["Payment"]] = relationship(back_populates="loan")

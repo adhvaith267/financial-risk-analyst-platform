@@ -4,6 +4,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.errors import PortfolioDataUnavailableError
 from app.engines.market_risk import load_portfolio_data
 from app.models.borrower import Borrower, Loan
 from app.models.market import Asset
@@ -21,6 +22,14 @@ class StressScenario:
     equity_shock: float  # e.g. -0.20 for -20%
     rate_shock_bps: float  # e.g. 150 for +150bps
     default_shock: float  # e.g. 0.30 for +30% relative PD increase
+
+    def __post_init__(self) -> None:
+        if not -1.0 <= self.equity_shock <= 0.0:
+            raise ValueError("equity_shock must be between -1.0 and 0.0")
+        if not -1000.0 <= self.rate_shock_bps <= 2000.0:
+            raise ValueError("rate_shock_bps must be between -1000 and 2000")
+        if not 0.0 <= self.default_shock <= 10.0:
+            raise ValueError("default_shock must be between 0 and 10")
 
 
 @dataclass
@@ -46,7 +55,10 @@ def _asset_price_shock(asset_class: str, scenario: StressScenario) -> float:
     if asset_class == "equity":
         return scenario.equity_shock
     if asset_class == "bond":
-        return -BOND_EFFECTIVE_DURATION_YEARS * (scenario.rate_shock_bps / 10_000)
+        return max(
+            -1.0,
+            -BOND_EFFECTIVE_DURATION_YEARS * (scenario.rate_shock_bps / 10_000),
+        )
     return 0.0  # cash and anything else: unaffected
 
 
@@ -58,6 +70,10 @@ def apply_market_shock(
 ) -> tuple[float, float, float]:
     """Pure: no DB access. Returns (market_loss, baseline_value, stressed_value)."""
     baseline_value = float((latest_prices * quantities).sum())
+    if not pd.notna(baseline_value) or baseline_value <= 0:
+        raise PortfolioDataUnavailableError("Portfolio has no positive priced value")
+    if latest_prices.reindex(quantities.index).isna().any():
+        raise PortfolioDataUnavailableError("Portfolio has incomplete priced positions")
 
     stressed_value = 0.0
     for asset_id, qty in quantities.items():
@@ -78,7 +94,10 @@ def derive_vulnerabilities(
     the same portfolio composition and shock magnitudes apply_market_shock
     uses - not a separate model, just naming what's already there."""
     dollar_positions = latest_prices * quantities
-    weights = dollar_positions / dollar_positions.sum()
+    portfolio_value = float(dollar_positions.sum())
+    if not pd.notna(portfolio_value) or portfolio_value <= 0:
+        raise PortfolioDataUnavailableError("Portfolio has no positive priced value")
+    weights = dollar_positions / portfolio_value
 
     vulnerabilities = []
 
@@ -113,7 +132,7 @@ def apply_default_shock(
     """
     baseline_el = 0.0
     stressed_el = 0.0
-    for loan, baseline_pd in zip(loans, baseline_pds):
+    for loan, baseline_pd in zip(loans, baseline_pds, strict=True):
         stressed_pd = min(1.0, baseline_pd * (1 + scenario.default_shock))
         lgd = 1 - loan.recovery_rate
         baseline_el += baseline_pd * lgd * loan.outstanding_balance
@@ -126,7 +145,12 @@ def compute_market_loss(
     db: Session, portfolio_id: str, scenario: StressScenario
 ) -> tuple[float, float, float, list[str]]:
     prices, quantities = load_portfolio_data(db, portfolio_id)
-    latest_prices = prices.dropna().iloc[-1]
+    complete_prices = prices.reindex(columns=quantities.index).dropna()
+    if complete_prices.empty:
+        raise PortfolioDataUnavailableError(
+            f"Portfolio {portfolio_id} does not have a complete latest price snapshot"
+        )
+    latest_prices = complete_prices.iloc[-1]
 
     assets = db.scalars(select(Asset).where(Asset.asset_id.in_(quantities.index.tolist()))).all()
     asset_classes = {a.asset_id: a.asset_class for a in assets}
@@ -162,7 +186,9 @@ def compute_credit_loss(db: Session, scenario: StressScenario) -> tuple[float, f
 
 
 def run_stress_test(db: Session, portfolio_id: str, scenario: StressScenario) -> StressResult:
-    market_loss, baseline_value, stressed_value, vulnerabilities = compute_market_loss(db, portfolio_id, scenario)
+    market_loss, baseline_value, stressed_value, vulnerabilities = compute_market_loss(
+        db, portfolio_id, scenario
+    )
     credit_loss, baseline_el, stressed_el = compute_credit_loss(db, scenario)
 
     return StressResult(

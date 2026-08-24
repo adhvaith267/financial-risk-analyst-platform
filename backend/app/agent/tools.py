@@ -2,9 +2,10 @@ import json
 
 from langchain_core.tools import StructuredTool
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.core.db import get_engine
+from app.core.db import get_session_factory
+from app.core.errors import ApplicationError
+from app.core.identifiers import normalize_identifier
 from app.engines.credit_risk import assess_borrower
 from app.engines.market_risk import assess_portfolio
 from app.engines.stress import StressScenario, run_stress_test
@@ -19,7 +20,7 @@ DEFAULT_DEFAULT_SHOCK = 0.30
 
 
 def _json(obj: dict) -> str:
-    return json.dumps(obj, default=str)
+    return json.dumps(obj, default=str, allow_nan=False)
 
 
 def build_tools() -> list[StructuredTool]:
@@ -35,12 +36,15 @@ def build_tools() -> list[StructuredTool]:
     def get_borrower(borrower_id: str) -> str:
         """Look up a borrower's credit profile (age, income, utilization,
         delinquency history, etc.) and their active loan, if any."""
-        with Session(get_engine()) as db:
+        borrower_id = normalize_identifier(borrower_id, "borrower_id")
+        with get_session_factory()() as db:
             borrower = db.get(Borrower, borrower_id)
             if borrower is None:
                 return _json({"error": f"Borrower {borrower_id} not found"})
             loan = db.scalars(
-                select(Loan).where(Loan.borrower_id == borrower_id, Loan.status == "active").limit(1)
+                select(Loan)
+                .where(Loan.borrower_id == borrower_id, Loan.status == "active")
+                .limit(1)
             ).first()
             return _json(
                 {
@@ -71,7 +75,8 @@ def build_tools() -> list[StructuredTool]:
 
     def get_portfolio(portfolio_id: str) -> str:
         """Look up a portfolio's current holdings (asset, quantity)."""
-        with Session(get_engine()) as db:
+        portfolio_id = normalize_identifier(portfolio_id, "portfolio_id")
+        with get_session_factory()() as db:
             portfolio = db.get(Portfolio, portfolio_id)
             if portfolio is None:
                 return _json({"error": f"Portfolio {portfolio_id} not found"})
@@ -82,7 +87,9 @@ def build_tools() -> list[StructuredTool]:
                 {
                     "portfolio_id": portfolio.portfolio_id,
                     "name": portfolio.name,
-                    "holdings": [{"asset_id": h.asset_id, "quantity": h.quantity} for h in holdings],
+                    "holdings": [
+                        {"asset_id": h.asset_id, "quantity": h.quantity} for h in holdings
+                    ],
                 }
             )
 
@@ -90,12 +97,15 @@ def build_tools() -> list[StructuredTool]:
         """Run the Credit Risk Engine for one borrower: gets PD from the
         SageMaker model, then computes LGD, EAD, and Expected Loss
         (EL = PD x LGD x EAD), plus the top SHAP-derived risk drivers."""
-        with Session(get_engine()) as db:
+        borrower_id = normalize_identifier(borrower_id, "borrower_id")
+        with get_session_factory()() as db:
             borrower = db.get(Borrower, borrower_id)
             if borrower is None:
                 return _json({"error": f"Borrower {borrower_id} not found"})
             loan = db.scalars(
-                select(Loan).where(Loan.borrower_id == borrower_id, Loan.status == "active").limit(1)
+                select(Loan)
+                .where(Loan.borrower_id == borrower_id, Loan.status == "active")
+                .limit(1)
             ).first()
             try:
                 result = assess_borrower(borrower, loan, explain=True)
@@ -107,10 +117,11 @@ def build_tools() -> list[StructuredTool]:
         """Run the Market Risk Engine for a portfolio: volatility, historical
         and parametric Value-at-Risk (95%/99%), Expected Shortfall, maximum
         drawdown, and concentration (HHI / largest position weight)."""
-        with Session(get_engine()) as db:
+        portfolio_id = normalize_identifier(portfolio_id, "portfolio_id")
+        with get_session_factory()() as db:
             try:
                 result = assess_portfolio(db, portfolio_id)
-            except ValueError as exc:
+            except ApplicationError as exc:
                 return _json({"error": str(exc)})
             return _json(result.__dict__)
 
@@ -127,16 +138,17 @@ def build_tools() -> list[StructuredTool]:
         to a portfolio and the whole active loan book, returning market loss,
         credit loss, and their combined loss. If the user just says
         "recession" or gives no numbers, use the defaults."""
+        portfolio_id = normalize_identifier(portfolio_id, "portfolio_id")
         scenario = StressScenario(
             name=scenario_name,
             equity_shock=equity_shock,
             rate_shock_bps=rate_shock_bps,
             default_shock=default_shock,
         )
-        with Session(get_engine()) as db:
+        with get_session_factory()() as db:
             try:
                 result = run_stress_test(db, portfolio_id, scenario)
-            except (ValueError, PDModelUnavailableError) as exc:
+            except (ApplicationError, ValueError) as exc:
                 return _json({"error": str(exc)})
             payload = {
                 "portfolio_id": result.portfolio_id,
