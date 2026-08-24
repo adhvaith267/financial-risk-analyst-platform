@@ -3,7 +3,7 @@ from functools import lru_cache
 
 import boto3
 from botocore.config import Config as BotoConfig
-from botocore.exceptions import BotoCoreError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import get_settings
 from app.core.errors import DependencyUnavailableError
@@ -55,7 +55,14 @@ class PDModelClient:
             return _validate_prediction_shape(
                 result, expected_count=1 if isinstance(features, dict) else len(features)
             )
-        except (BotoCoreError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        except (
+            BotoCoreError,
+            ClientError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
             raise PDModelUnavailableError(
                 f"Credit model is unavailable: SageMaker endpoint '{self._endpoint_name}' "
                 "could not return a prediction."
