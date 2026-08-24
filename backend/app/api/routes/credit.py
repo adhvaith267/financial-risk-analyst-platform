@@ -6,6 +6,7 @@ from app.core.db import get_db
 from app.engines.credit_risk import assess_borrower
 from app.models.borrower import Borrower, Loan
 from app.models.risk import RiskResult
+from app.services.sagemaker_client import PDModelUnavailableError
 from app.schemas.credit import (
     BorrowerProfile,
     BorrowerSummary,
@@ -41,7 +42,10 @@ def assess(borrower_id: str, explain: bool = False, db: Session = Depends(get_db
         select(Loan).where(Loan.borrower_id == borrower_id, Loan.status == "active").limit(1)
     ).first()
 
-    result = assess_borrower(borrower, loan, explain=explain)
+    try:
+        result = assess_borrower(borrower, loan, explain=explain)
+    except PDModelUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     db.add(
         RiskResult(

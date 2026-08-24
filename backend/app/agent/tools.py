@@ -10,6 +10,7 @@ from app.engines.market_risk import assess_portfolio
 from app.engines.stress import StressScenario, run_stress_test
 from app.models.borrower import Borrower, Loan
 from app.models.market import Portfolio, PortfolioHolding
+from app.services.sagemaker_client import PDModelUnavailableError
 
 # Default recession scenario used when the user doesn't specify shock magnitudes.
 DEFAULT_EQUITY_SHOCK = -0.20
@@ -96,7 +97,10 @@ def build_tools() -> list[StructuredTool]:
             loan = db.scalars(
                 select(Loan).where(Loan.borrower_id == borrower_id, Loan.status == "active").limit(1)
             ).first()
-            result = assess_borrower(borrower, loan, explain=True)
+            try:
+                result = assess_borrower(borrower, loan, explain=True)
+            except PDModelUnavailableError as exc:
+                return _json({"error": str(exc)})
             return _json(result.__dict__)
 
     def assess_market_risk(portfolio_id: str) -> str:
@@ -132,7 +136,7 @@ def build_tools() -> list[StructuredTool]:
         with Session(get_engine()) as db:
             try:
                 result = run_stress_test(db, portfolio_id, scenario)
-            except ValueError as exc:
+            except (ValueError, PDModelUnavailableError) as exc:
                 return _json({"error": str(exc)})
             payload = {
                 "portfolio_id": result.portfolio_id,

@@ -10,14 +10,9 @@
  *   POST /api/stress/portfolios/{id}/run
  *   POST /api/agent/ask
  *
- * Falls back to mock data if the backend is unreachable so the UI stays
- * demonstrable in development without a running backend.
- *
  * Set VITE_RISKORA_API_URL to point at a different backend origin; when unset
  * requests go to the same origin (Nginx proxies /api/ → FastAPI).
  */
-
-import { mockFor } from "./riskora-mock";
 
 const BASE =
   (import.meta.env["VITE_RISKORA_API_URL"] as string | undefined)?.replace(/\/$/, "") ?? "";
@@ -31,17 +26,7 @@ export class RiskoraApiError extends Error {
   }
 }
 
-const DELAY = 420;
-
-async function fallback<T>(mockKey: string, body?: unknown): Promise<T> {
-  const mock = mockFor(mockKey, body);
-  if (mock === undefined)
-    return Promise.reject(new RiskoraApiError("No data available for this request.", 0));
-  await new Promise((r) => setTimeout(r, DELAY));
-  return mock as T;
-}
-
-async function request<T>(path: string, init?: RequestInit, mockKey?: string, body?: unknown): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${BASE}${path}`, {
@@ -52,7 +37,10 @@ async function request<T>(path: string, init?: RequestInit, mockKey?: string, bo
       },
     });
   } catch {
-    return fallback<T>(mockKey ?? path, body);
+    throw new RiskoraApiError(
+      "Riskora API is unavailable. Check the backend service and try again.",
+      0,
+    );
   }
 
   if (!response.ok) {
@@ -63,25 +51,23 @@ async function request<T>(path: string, init?: RequestInit, mockKey?: string, bo
     } catch {
       /* response had no JSON body */
     }
-    // Only fall back to mock on 5xx (server errors); surface 4xx as real errors
-    // so bad input (wrong ID, missing resource) is visible to the user.
-    if (response.status >= 500)
-      return fallback<T>(mockKey ?? path, body);
     throw new RiskoraApiError(detail, response.status);
   }
 
   try {
     return (await response.json()) as T;
   } catch {
-    return fallback<T>(mockKey ?? path, body);
+    throw new RiskoraApiError(
+      "The API returned an invalid response. Check the backend logs and try again.",
+      response.status,
+    );
   }
 }
 
-const apiGet = <T>(path: string, mockKey?: string) =>
-  request<T>(path, undefined, mockKey ?? path);
+const apiGet = <T>(path: string) => request<T>(path);
 
-const apiPost = <T>(path: string, body: unknown, mockKey?: string) =>
-  request<T>(path, { method: "POST", body: JSON.stringify(body) }, mockKey ?? path, body);
+const apiPost = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: "POST", body: JSON.stringify(body) });
 
 /* ---- Endpoint wrappers ------------------------------------------- */
 
@@ -133,7 +119,6 @@ export const runCreditAnalysis = async <T = unknown>(
 
   const raw = await apiGet<Record<string, unknown>>(
     `/api/credit/borrowers/${encodeURIComponent(borrowerId)}/assess`,
-    "/api/credit/analyze",
   );
 
   // The backend returns { borrower: {...}, pd, lgd, ead, expected_loss, status, risk_drivers, ... }
@@ -217,7 +202,6 @@ export const runMarketAnalysis = async <T = unknown>(
 
   const raw = await apiGet<Record<string, unknown>>(
     `/api/market/portfolios/${encodeURIComponent(portfolioId)}/risk`,
-    "/api/market/analyze",
   );
 
   return shapeMarketResponse(raw) as T;
@@ -307,7 +291,6 @@ export const runStressTest = async <T = unknown>(
   const raw = await apiPost<Record<string, unknown>>(
     `/api/stress/portfolios/${encodeURIComponent(portfolioId)}/run`,
     body,
-    "/api/stress/run",
   );
 
   return shapeStressResponse(raw) as T;
@@ -348,7 +331,7 @@ function shapeStressResponse(raw: Record<string, unknown>): Record<string, unkno
 export const askAgent = async <T = unknown>(
   payload: Record<string, unknown>,
 ): Promise<T> => {
-  const raw = await apiPost<Record<string, unknown>>("/api/agent/ask", payload, "/api/agent/ask");
+  const raw = await apiPost<Record<string, unknown>>("/api/agent/ask", payload);
   return shapeAgentResponse(raw) as T;
 };
 

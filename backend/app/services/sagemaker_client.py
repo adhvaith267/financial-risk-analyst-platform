@@ -1,8 +1,13 @@
 import json
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import get_settings
+
+
+class PDModelUnavailableError(RuntimeError):
+    """Raised when the configured credit model cannot serve a prediction."""
 
 
 class PDModelClient:
@@ -28,13 +33,19 @@ class PDModelClient:
                 payload["explain"] = True
         else:
             payload = list(features)
-        response = self._client.invoke_endpoint(
-            EndpointName=self._endpoint_name,
-            ContentType="application/json",
-            Accept="application/json",
-            Body=json.dumps(payload),
-        )
-        return json.loads(response["Body"].read())
+        try:
+            response = self._client.invoke_endpoint(
+                EndpointName=self._endpoint_name,
+                ContentType="application/json",
+                Accept="application/json",
+                Body=json.dumps(payload),
+            )
+            return json.loads(response["Body"].read())
+        except (BotoCoreError, ClientError, json.JSONDecodeError) as exc:
+            raise PDModelUnavailableError(
+                f"Credit model is unavailable: SageMaker endpoint '{self._endpoint_name}' "
+                "could not return a prediction."
+            ) from exc
 
 
 _client: PDModelClient | None = None
