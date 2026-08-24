@@ -78,7 +78,7 @@ export const getDashboardSummary = async <T = unknown>(): Promise<T> => {
 };
 
 function shapeDashboardResponse(raw: Record<string, unknown>): Record<string, unknown> {
-  // The real backend uses different field names than the mock/UI expects.
+  // The backend uses different field names than the UI expects.
   // Map them here so DashboardView metrics display real data.
   return {
     ...raw,

@@ -131,7 +131,6 @@ financial-risk-analyst-platform/
 │   │   │   └── riskora/        # Landing page components (logo, header, footer…)
 │   │   ├── lib/
 │   │   │   ├── riskora-api.ts  # Axios-free API client + response shaping
-│   │   │   └── riskora-mock.ts # Fallback mock data used when backend is down
 │   │   ├── routes/
 │   │   │   ├── __root.tsx      # App shell (404 + error boundaries)
 │   │   │   ├── index.tsx       # Landing page (/)
@@ -523,7 +522,9 @@ The Vite dev server is configured to proxy all `/api/*` requests to `http://loca
 
 ### Without a running backend
 
-If the backend is unreachable, the frontend automatically falls back to the mock data in `src/lib/riskora-mock.ts`. The mock always returns the same fixed response, which makes it obvious something is wrong. Remove or skip the fallback in `riskora-api.ts` if you want hard errors during development.
+The frontend does not fabricate fallback data. Network failures, invalid responses,
+and backend errors are shown directly in the relevant view so unavailable
+dependencies are visible to the analyst.
 
 ---
 
@@ -657,8 +658,10 @@ The platform has no login, no user accounts, and no access control. Anyone with 
 **Dashboard computes market risk on every load**
 The dashboard endpoint calls `assess_portfolio()` for every portfolio to aggregate a total portfolio value and headline metrics. For the current single-portfolio demo this is fast, but this pattern would be expensive at any real portfolio count. The correct approach is to cache or pre-compute these metrics and serve them from the `risk_results` table.
 
-**Mock fallback masks backend errors silently**
-When the backend returns a 5xx error, the frontend falls back to hardcoded mock data and shows no error to the user. This was convenient for demos when the SageMaker endpoint was down, but it makes real failures invisible. The 404 case was already fixed (it now surfaces as an error), but 5xx errors still silently return mock data.
+**Unavailable dependencies are reported explicitly**
+Credit and stress analysis require the configured SageMaker endpoint. If that
+dependency is unavailable, the backend returns HTTP 503 with a descriptive
+error and the frontend displays it instead of substituting fabricated results.
 
 **No rate limiting or request validation beyond schema**
 The API has no rate limiting, no request size limits beyond Pydantic's schema validation, and no authentication. Bedrock and SageMaker calls are billed per request, so a malicious or runaway caller could incur unbounded costs.
@@ -669,8 +672,11 @@ The API has no rate limiting, no request size limits beyond Pydantic's schema va
 
 These are real architectural risks — things that did not become problems in this project but easily could have with different choices or at larger scale.
 
-**Case-sensitive IDs causing silent fallback to mock data**
-This one actually did occur during development. The backend stores and queries borrower and portfolio IDs in uppercase (`B1001`, `P001`). The frontend was sending user-typed input directly without normalizing case. A user typing `p001` or `b1001` got a 404 from the backend, which the API client silently converted to mock data. The fix was to uppercase IDs in the API client before sending and to stop treating 404 as a fallback trigger. The lesson: when IDs are case-sensitive strings, normalize at the edge closest to the user, not deep in the backend.
+**Case-sensitive IDs at the API boundary**
+The backend stores and queries borrower and portfolio IDs in uppercase (`B1001`,
+`P001`). The frontend normalizes user input before sending requests, while a
+missing resource remains a visible 404 instead of being replaced with another
+result.
 
 **SQLAlchemy sessions shared across threads in the agent**
 LangGraph's `ToolNode` can run tool calls concurrently in separate threads. SQLAlchemy `Session` objects are explicitly not thread-safe — sharing a single session across tool calls in a multi-threaded context would cause intermittent `DetachedInstanceError` or silent data corruption. The tools were written to open and close their own short-lived sessions per call, which avoids this entirely. Had the tools shared a single session injected at startup, this would have been a hard-to-reproduce race condition.
