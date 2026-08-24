@@ -11,7 +11,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 
 from app.api.routes.agent import router as agent_router
-from app.api.routes.auth import router as auth_router
 from app.api.routes.credit import router as credit_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.market import router as market_router
@@ -38,8 +37,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().allowed_origins_list,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-    allow_credentials=True,
+    allow_headers=["Content-Type", "X-Request-ID"],
 )
 
 app.include_router(credit_router)
@@ -47,7 +45,6 @@ app.include_router(market_router)
 app.include_router(stress_router)
 app.include_router(agent_router)
 app.include_router(dashboard_router)
-app.include_router(auth_router)
 
 
 @app.middleware("http")
@@ -62,7 +59,6 @@ async def request_id_middleware(request: Request, call_next):
 
 @app.exception_handler(ApplicationError)
 async def application_error_handler(request: Request, exc: ApplicationError) -> JSONResponse:
-    headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -71,7 +67,6 @@ async def application_error_handler(request: Request, exc: ApplicationError) -> 
             "code": exc.code,
             "request_id": getattr(request.state, "request_id", None),
         },
-        headers=headers,
     )
 
 

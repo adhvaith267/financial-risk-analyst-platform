@@ -93,13 +93,6 @@ cd "$APP_DIR/backend"
 set -a && source "$ENV_FILE" && set +a
 : "${DB_HOST:?Set DB_HOST in $ENV_FILE}"
 : "${DB_PASSWORD:?Set DB_PASSWORD in $ENV_FILE}"
-if [ "${APP_ENV:-development}" = "production" ]; then
-    : "${AUTH_SECRET_KEY:?Set AUTH_SECRET_KEY in $ENV_FILE}"
-    if [ "${GOOGLE_AUTH_ENABLED:-false}" != "true" ]; then
-        : "${AUTH_USERNAME:?Set AUTH_USERNAME in $ENV_FILE}"
-        : "${AUTH_PASSWORD_HASH:?Set AUTH_PASSWORD_HASH in $ENV_FILE}"
-    fi
-fi
 uv run alembic upgrade head
 sudo systemctl restart financial-risk-api
 

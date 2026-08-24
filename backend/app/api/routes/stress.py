@@ -1,18 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.auth import require_roles
 from app.core.db import get_db
 from app.core.identifiers import normalize_identifier
 from app.engines.stress import StressScenario, run_stress_test
 from app.models.risk import StressResult as StressResultModel
 from app.schemas.stress import StressResultResponse, StressScenarioRequest
 
-router = APIRouter(
-    prefix="/stress",
-    tags=["stress"],
-    dependencies=[Depends(require_roles("analyst", "admin"))],
-)
+router = APIRouter(prefix="/stress", tags=["stress"])
 
 
 @router.post("/portfolios/{portfolio_id}/run", response_model=StressResultResponse)

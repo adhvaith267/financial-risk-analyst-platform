@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_roles
 from app.core.db import get_db
 from app.core.identifiers import normalize_identifier
 from app.engines.market_risk import assess_portfolio
@@ -10,11 +9,7 @@ from app.models.market import Portfolio
 from app.models.risk import RiskResult
 from app.schemas.market import MarketRiskResponse, PortfolioSummary
 
-router = APIRouter(
-    prefix="/market",
-    tags=["market"],
-    dependencies=[Depends(require_roles("analyst", "admin"))],
-)
+router = APIRouter(prefix="/market", tags=["market"])
 
 
 @router.get("/portfolios", response_model=list[PortfolioSummary])

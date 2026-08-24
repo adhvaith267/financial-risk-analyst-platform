@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_roles
 from app.core.db import get_db
 from app.core.errors import ResourceNotFoundError
 from app.core.identifiers import normalize_identifier
@@ -15,11 +14,7 @@ from app.schemas.credit import (
     CreditAssessmentResponse,
 )
 
-router = APIRouter(
-    prefix="/credit",
-    tags=["credit"],
-    dependencies=[Depends(require_roles("analyst", "admin"))],
-)
+router = APIRouter(prefix="/credit", tags=["credit"])
 
 
 @router.get("/borrowers", response_model=list[BorrowerSummary])

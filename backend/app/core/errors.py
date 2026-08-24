@@ -38,13 +38,3 @@ class DatabaseUnavailableError(DependencyUnavailableError):
 
 class AgentUnavailableError(DependencyUnavailableError):
     code = "agent_unavailable"
-
-
-class AuthenticationRequiredError(ApplicationError):
-    status_code = 401
-    code = "authentication_required"
-
-
-class AuthorizationDeniedError(ApplicationError):
-    status_code = 403
-    code = "authorization_denied"

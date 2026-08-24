@@ -17,7 +17,6 @@
 const BASE =
   (import.meta.env["VITE_RISKORA_API_URL"] as string | undefined)?.replace(/\/$/, "") ?? "";
 const REQUEST_TIMEOUT_MS = 30_000;
-const ACCESS_TOKEN_KEY = "riskora_access_token";
 
 export class RiskoraApiError extends Error {
   status: number;
@@ -32,15 +31,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const accessToken = sessionStorage.getItem(ACCESS_TOKEN_KEY);
   try {
     response = await fetch(`${BASE}${path}`, {
       ...init,
       signal: controller.signal,
-      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(init?.headers ?? {}),
       },
     });
@@ -55,7 +51,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    if (response.status === 401) clearAccessToken();
     let detail = `Request failed with status ${response.status}.`;
     try {
       const errBody = (await response.json()) as {
@@ -88,32 +83,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 }
-
-export const hasAccessToken = () => Boolean(sessionStorage.getItem(ACCESS_TOKEN_KEY));
-
-export const clearAccessToken = () => sessionStorage.removeItem(ACCESS_TOKEN_KEY);
-
-export const getCurrentUser = async () =>
-  request<{ username: string; role: string }>("/api/auth/me");
-
-export const logout = async () => {
-  clearAccessToken();
-  try {
-    await request<void>("/api/auth/logout", { method: "POST" });
-  } catch {
-    // Local credentials are already cleared; an expired server cookie is harmless.
-  }
-};
-
-export const login = async (username: string, password: string): Promise<void> => {
-  const body = new URLSearchParams({ username, password });
-  const response = await request<{ access_token: string }>("/api/auth/token", {
-    method: "POST",
-    body,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  });
-  sessionStorage.setItem(ACCESS_TOKEN_KEY, response.access_token);
-};
 
 const apiGet = <T>(path: string) => request<T>(path);
 

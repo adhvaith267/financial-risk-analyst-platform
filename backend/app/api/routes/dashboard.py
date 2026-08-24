@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.auth import require_roles
 from app.core.db import get_db
 from app.engines.market_risk import assess_portfolio
 from app.models.borrower import Borrower, Loan
@@ -12,11 +11,7 @@ from app.models.market import Portfolio
 from app.models.risk import RiskResult, StressResult
 from app.schemas.dashboard import DashboardSummary, RecentAnalysis, RiskDriverFrequency
 
-router = APIRouter(
-    prefix="/dashboard",
-    tags=["dashboard"],
-    dependencies=[Depends(require_roles("analyst", "admin"))],
-)
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 # How many recent credit assessments to scan when aggregating "top risk
 # drivers" - a rolling window, not the full history.

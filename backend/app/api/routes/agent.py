@@ -1,15 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from app.agent.graph import ask
-from app.auth import require_roles
 from app.core.errors import InvalidInputError
 from app.schemas.agent import AgentAskRequest, AgentAskResponse, AgentTraceStep
 
-router = APIRouter(
-    prefix="/agent",
-    tags=["agent"],
-    dependencies=[Depends(require_roles("analyst", "admin"))],
-)
+router = APIRouter(prefix="/agent", tags=["agent"])
 
 
 @router.post("/ask", response_model=AgentAskResponse)

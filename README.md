@@ -607,18 +607,6 @@ Copy `backend/.env.example` to `backend/.env` and fill in the required values. O
 | `DB_NAME` | No | `fra` | Database name |
 | `DB_USER` | No | `fra_admin` | Database user |
 | `DB_PASSWORD` | Yes | — | Database password |
-| `AUTH_ENABLED` | No | `true` | Enable bearer-token authentication |
-| `AUTH_USERNAME` | Yes if password login is enabled | — | Single platform account username |
-| `AUTH_PASSWORD_HASH` | Yes if password login is enabled | — | Argon2 password hash; never store the plaintext password |
-| `AUTH_SECRET_KEY` | Yes in production | — | Secret used to sign access tokens |
-| `AUTH_ROLE` | No | `analyst` | Account role (`analyst` or `admin`) |
-| `AUTH_TOKEN_EXPIRE_MINUTES` | No | `60` | Access-token lifetime |
-| `GOOGLE_AUTH_ENABLED` | No | `false` | Enable Google/Gmail OpenID Connect login |
-| `GOOGLE_CLIENT_ID` | Required when enabled | — | Google OAuth web-client ID |
-| `GOOGLE_CLIENT_SECRET` | Required when enabled | — | Google OAuth web-client secret |
-| `GOOGLE_REDIRECT_URI` | Required when enabled | local callback | Registered Google OAuth callback URL |
-| `GOOGLE_ALLOWED_EMAILS` | Required when enabled unless domains are set | — | Comma-separated exact Google accounts |
-| `GOOGLE_ALLOWED_EMAIL_DOMAINS` | Required when enabled unless emails are set | — | Comma-separated approved domains |
 | `AWS_REGION` | No | `ap-south-1` | AWS region for SageMaker and Bedrock |
 | `SAGEMAKER_ENDPOINT_NAME` | No | `gmsc-pd-endpoint` | SageMaker endpoint to invoke for PD |
 | `BEDROCK_MODEL_ID` | No | `moonshot.kimi-k2-thinking` | Bedrock model ID for the AI analyst |
@@ -627,13 +615,6 @@ Copy `backend/.env.example` to `backend/.env` and fill in the required values. O
 | `ALLOWED_ORIGINS` | No | empty | Comma-separated CORS origins (set explicitly for cross-origin development) |
 
 On EC2 with `FRA-EC2Role` attached, do not set `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY`. boto3 picks up the instance role automatically. For local dev, set `AWS_PROFILE=fra-dev` in your `.env`.
-
-Generate a password hash without storing the plaintext in the repository. Put the resulting value in `AUTH_PASSWORD_HASH` wrapped in single quotes because Argon2 hashes contain `$` characters:
-
-```bash
-cd backend
-uv run python -c "from app.auth import create_password_hash; print(create_password_hash('replace-this-password'))"
-```
 
 ---
 
