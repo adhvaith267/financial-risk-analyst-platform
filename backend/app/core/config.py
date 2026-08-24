@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     db_name: str = "fra"
     db_user: str = "fra_admin"
     db_password: str = Field(min_length=1)
+    db_ssl_mode: Literal["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] = (
+        "prefer"
+    )
     db_pool_size: int = Field(default=5, ge=1, le=50)
     db_max_overflow: int = Field(default=10, ge=0, le=100)
     db_pool_timeout_seconds: int = Field(default=10, ge=1, le=120)
@@ -67,6 +70,7 @@ class Settings(BaseSettings):
             host=self.db_host,
             port=self.db_port,
             database=self.db_name,
+            query={"sslmode": self.db_ssl_mode},
         )
 
 

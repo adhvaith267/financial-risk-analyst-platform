@@ -607,6 +607,7 @@ Copy `backend/.env.example` to `backend/.env` and fill in the required values. O
 | `DB_NAME` | No | `fra` | Database name |
 | `DB_USER` | No | `fra_admin` | Database user |
 | `DB_PASSWORD` | Yes | — | Database password |
+| `DB_SSL_MODE` | No | `prefer` | PostgreSQL TLS mode; use `require` when RDS enforces encryption |
 | `AWS_REGION` | No | `ap-south-1` | AWS region for SageMaker and Bedrock |
 | `SAGEMAKER_ENDPOINT_NAME` | No | `gmsc-pd-endpoint` | SageMaker endpoint to invoke for PD |
 | `BEDROCK_MODEL_ID` | No | `moonshot.kimi-k2-thinking` | Bedrock model ID for the AI analyst |
