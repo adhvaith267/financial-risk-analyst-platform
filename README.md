@@ -44,19 +44,20 @@ Riskora brings credit risk, portfolio market risk, stress testing, and tool-grou
 ## Table of contents
 
 1. [Overview](#overview)
-2. [Repository structure](#repository-structure)
-3. [Architecture](#architecture)
-4. [Core risk engines](#core-risk-engines)
-5. [AI analyst](#ai-analyst)
-6. [API reference](#api-reference)
-7. [Data model](#data-model)
-8. [Technology stack](#technology-stack)
-9. [Local development setup](#local-development-setup)
-10. [Deployment (EC2)](#deployment-ec2)
-11. [Environment variables](#environment-variables)
-12. [Running tests](#running-tests)
-13. [Drawbacks and known limitations](#drawbacks-and-known-limitations)
-14. [Issues that could have arisen](#issues-that-could-have-arisen)
+2. [Current runtime behavior](#current-runtime-behavior)
+3. [Repository structure](#repository-structure)
+4. [Architecture](#architecture)
+5. [Core risk engines](#core-risk-engines)
+6. [AI analyst](#ai-analyst)
+7. [API reference](#api-reference)
+8. [Data model](#data-model)
+9. [Technology stack](#technology-stack)
+10. [Local development setup](#local-development-setup)
+11. [Deployment (EC2)](#deployment-ec2)
+12. [Environment variables](#environment-variables)
+13. [Running tests](#running-tests)
+14. [Drawbacks and known limitations](#drawbacks-and-known-limitations)
+15. [Issues that could have arisen](#issues-that-could-have-arisen)
 
 ---
 
@@ -66,13 +67,23 @@ Riskora is a full-stack financial risk platform built as a personal project to d
 
 | Area | What is implemented |
 | --- | --- |
-| Credit Risk | SageMaker-hosted LightGBM model for probability of default (PD), with deterministic LGD, EAD, and expected-loss calculation layered on top |
+| Credit Risk | Configured SageMaker LightGBM model for probability of default (PD), with deterministic LGD, EAD, and expected-loss calculation layered on top |
 | Market Risk | Historical-simulation VaR, parametric VaR, expected shortfall, drawdown, HHI concentration, and pairwise correlation, computed from stored daily prices |
 | Stress Testing | Combined equity price shock, interest-rate duration shock, and default-rate shock applied simultaneously to the market portfolio and the full active credit book |
 | AI Analyst | LangGraph ReAct agent backed by Amazon Bedrock (Kimi K2) that selects and calls the risk tools, then returns a grounded answer with its full tool-execution trace |
 | Dashboard | Aggregated KPIs, recent analyses, and top risk drivers surfaced from stored results — no re-running the ML model on page load |
 
 The frontend is a React SPA (TypeScript, TanStack Router, Tailwind CSS v4) served as static files by Nginx. The backend is a FastAPI service with SQLAlchemy and Alembic, running on the same EC2 instance behind Nginx's `/api/` reverse proxy.
+
+---
+
+## Current runtime behavior
+
+- The platform has no login, user accounts, or authorization layer. Authentication is intentionally deferred.
+- The frontend uses the current backend response contracts and does not fabricate fallback or mock analysis results.
+- Credit and stress analysis require the configured SageMaker PD endpoint. If it is unavailable, the API returns HTTP 503 with a `dependency_unavailable` error and the UI displays that error.
+- The repository and EC2 deployment scripts do not provision or deploy the GMSC SageMaker endpoint. Set `SAGEMAKER_ENDPOINT_NAME` only when an endpoint has been provisioned separately.
+- The current production deployment uses PostgreSQL on RDS, FastAPI/Uvicorn on EC2, and Nginx for HTTPS, static files, and `/api/` proxying.
 
 ---
 
@@ -109,7 +120,7 @@ financial-risk-analyst-platform/
 │   │   │   ├── agent.py
 │   │   │   └── dashboard.py
 │   │   ├── services/
-│   │   │   └── sagemaker_client.py  # Thin boto3 wrapper for gmsc-pd-endpoint
+│   │   │   └── sagemaker_client.py  # Thin boto3 wrapper for the configured PD endpoint
 │   │   └── main.py             # FastAPI app, CORS middleware, router registration
 │   ├── alembic/                # DB migration scripts
 │   ├── tests/                  # pytest test suite
@@ -176,7 +187,7 @@ riskora.online (DNS A record → EC2 Elastic IP 15.206.37.142)
         │     └── /api/*     → FastAPI :8000 (reverse proxy, strips /api prefix)
         │
         ├── FastAPI :8000  (systemd service, 2 Uvicorn workers, localhost only)
-        │     ├── Credit Risk engine  → SageMaker  gmsc-pd-endpoint
+        │     ├── Credit Risk engine  → optional SageMaker PD endpoint
         │     ├── Market Risk engine  → RDS PostgreSQL
         │     ├── Stress Test engine  → RDS + SageMaker
         │     └── LangGraph ReAct agent
@@ -190,8 +201,8 @@ riskora.online (DNS A record → EC2 Elastic IP 15.206.37.142)
         ├── RDS PostgreSQL 17  (db.t4g.micro, private subnet)
         │     fra-postgres-dev  —  only reachable from fra-app-sg
         │
-        └── SageMaker  gmsc-pd-endpoint  (ml.m5.xlarge, real-time)
-              LightGBM PD model — gmsc-xgb-v1 — from financial-risk-analyst-ml repo
+        └── Optional SageMaker PD endpoint
+              Configured separately; not provisioned or deployed by this repository
 ```
 
 FastAPI is bound to `127.0.0.1:8000` and is not reachable directly from the internet. All traffic goes through Nginx. RDS is in a private subnet with a security group that only accepts connections from the EC2 instance's security group (`fra-app-sg`). SageMaker is invoked via the boto3 SDK using the EC2 instance's IAM role (`FRA-EC2Role`) — no access keys are stored on the instance.
@@ -202,7 +213,7 @@ FastAPI is bound to `127.0.0.1:8000` and is not reachable directly from the inte
 Browser → Nginx /api/credit/borrowers/B1001/assess
         → FastAPI /credit/borrowers/B1001/assess
         → credit_risk engine
-        → PDModelClient.predict()  →  SageMaker gmsc-pd-endpoint
+        → PDModelClient.predict()  →  configured SageMaker PD endpoint
         ← { pd, status, model_version, risk_drivers }
         ← engine computes LGD = 1 − recovery_rate, EAD, EL = PD × LGD × EAD
         → RiskResult persisted to RDS
@@ -217,7 +228,7 @@ Browser → Nginx /api/credit/borrowers/B1001/assess
 
 `backend/app/engines/credit_risk.py`
 
-The SageMaker endpoint (`gmsc-pd-endpoint`) hosts a LightGBM model trained on the Give Me Some Credit (GMSC) dataset. The model takes 10 borrower features and returns:
+When provisioned separately, the configured SageMaker endpoint hosts a LightGBM model trained on the Give Me Some Credit (GMSC) dataset. The model takes 10 borrower features and returns:
 
 - `pd` — probability of default (0–1)
 - `status` — `APPROVED` or `DECLINED` based on the configured threshold
@@ -452,7 +463,7 @@ There is no foreign key between portfolios and loans. The credit book (borrowers
 | EC2 t3.small | Hosts Nginx + FastAPI on Amazon Linux 2023 |
 | Elastic IP | Static IP for the EC2 instance (15.206.37.142) |
 | RDS PostgreSQL 17 (db.t4g.micro) | Primary data store, private subnet |
-| SageMaker (ml.m5.xlarge) | Hosts the LightGBM PD model (`gmsc-pd-endpoint`) |
+| SageMaker | Optional external dependency for the LightGBM PD model; this repository does not provision it |
 | Amazon Bedrock | Hosts the LLM (`moonshot.kimi-k2-thinking`) per-request |
 | S3 | Stores ML model artifacts and approved ingestion inputs |
 | IAM | EC2 instance role (`FRA-EC2Role`) with least-privilege SageMaker + Bedrock access |
@@ -523,6 +534,10 @@ The frontend does not fabricate fallback data. Network failures, invalid respons
 and backend errors are shown directly in the relevant view so unavailable
 dependencies are visible to the analyst.
 
+If SageMaker is not configured or its endpoint does not exist, dashboard and
+market endpoints that do not need PD can still work, while credit and stress
+requests return a descriptive `503 dependency_unavailable` response.
+
 ---
 
 ## Deployment (EC2)
@@ -539,6 +554,9 @@ Full setup instructions are in `deployment/aws/ec2-setup.sh` (run once on a fres
 - `EC2_KNOWN_HOSTS` — pinned output from `ssh-keyscan` for the host
 
 The workflow uses a serialized production deployment, refuses a dirty EC2 checkout, applies migrations before restarting the API, and verifies both `/health` and `/ready`. Configure required reviewers on the `production` environment if live deployment approval is required.
+
+The CD workflow deploys the commit that passed CI. It does not provision AWS
+resources, create a SageMaker endpoint, or deploy the GMSC model.
 
 ### Quick re-deploy after a code change
 
@@ -576,9 +594,11 @@ sudo systemctl status  nginx
 sudo systemctl reload  nginx
 ```
 
-### Cost-saving: pausing the infrastructure
+### Optional SageMaker cost control
 
-The SageMaker endpoint (`ml.m5.xlarge`) costs ~$5.50/day and is the dominant cost item. Delete it when not in use:
+If a SageMaker endpoint has been provisioned separately, it is usually the
+dominant cost item. Delete it when not in use; the application will then report
+credit/stress dependency errors instead of returning mock results:
 
 ```bash
 # Delete SageMaker endpoint (model config and artifacts are preserved in S3)
@@ -609,7 +629,7 @@ Copy `backend/.env.example` to `backend/.env` and fill in the required values. O
 | `DB_PASSWORD` | Yes | — | Database password |
 | `DB_SSL_MODE` | No | `prefer` | PostgreSQL TLS mode; use `require` when RDS enforces encryption |
 | `AWS_REGION` | No | `ap-south-1` | AWS region for SageMaker and Bedrock |
-| `SAGEMAKER_ENDPOINT_NAME` | No | `gmsc-pd-endpoint` | SageMaker endpoint to invoke for PD |
+| `SAGEMAKER_ENDPOINT_NAME` | No | `gmsc-pd-endpoint` | Existing SageMaker endpoint to invoke for PD; missing endpoints produce HTTP 503 |
 | `BEDROCK_MODEL_ID` | No | `moonshot.kimi-k2-thinking` | Bedrock model ID for the AI analyst |
 | `DEFAULT_RECOVERY_RATE` | No | `0.60` | Recovery rate assumption when a loan has no specific value |
 | `CREDIT_DECLINE_THRESHOLD` | No | `0.10` | PD above which a borrower is DECLINED |
@@ -641,6 +661,12 @@ uv run pytest --cov=app --cov-report=term-missing
 The test suite covers: credit risk engine (isolated SageMaker contract), market risk engine (deterministic fixtures), stress test engine (deterministic shock calculations), and invalid dependency-response handling. External AWS calls are isolated in unit tests and are not used as production fallbacks.
 
 Every push and pull request runs the same backend Ruff/pytest gates and frontend TypeScript/ESLint/Prettier/Vite gates in GitHub Actions (`.github/workflows/ci.yml`).
+
+On pushes to `main`, the CD workflow (`.github/workflows/cd.yml`) runs only
+after CI succeeds, checks out the tested commit on EC2, builds the frontend,
+applies migrations, restarts `financial-risk-api`, and verifies health and
+readiness. GitHub repository dependency-graph automation is separate from
+these workflows.
 
 ---
 
