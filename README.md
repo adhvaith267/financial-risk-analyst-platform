@@ -44,7 +44,7 @@ Riskora brings credit risk, portfolio market risk, stress testing, and tool-grou
 ## Table of contents
 
 1. [Overview](#overview)
-2. [Current runtime behavior](#current-runtime-behavior)
+2. [Runtime behavior](#runtime-behavior)
 3. [Repository structure](#repository-structure)
 4. [Architecture](#architecture)
 5. [Core risk engines](#core-risk-engines)
@@ -77,12 +77,11 @@ The frontend is a React SPA (TypeScript, TanStack Router, Tailwind CSS v4) serve
 
 ---
 
-## Current runtime behavior
+## Runtime behavior
 
-- The platform has no login, user accounts, or authorization layer. Authentication is intentionally deferred.
 - The frontend uses the current backend response contracts and does not fabricate fallback or mock analysis results.
-- Credit and stress analysis require the configured SageMaker PD endpoint. If it is unavailable, the API returns HTTP 503 with a `dependency_unavailable` error and the UI displays that error.
-- The repository and EC2 deployment scripts do not provision or deploy the GMSC SageMaker endpoint. Set `SAGEMAKER_ENDPOINT_NAME` only when an endpoint has been provisioned separately.
+- Credit and stress analysis use the deployed GMSC LightGBM PD model through the configured SageMaker endpoint.
+- The GMSC endpoint was temporarily stopped to control AWS cost. Restart it before running credit or stress analysis.
 - The current production deployment uses PostgreSQL on RDS, FastAPI/Uvicorn on EC2, and Nginx for HTTPS, static files, and `/api/` proxying.
 
 ---
@@ -120,7 +119,7 @@ financial-risk-analyst-platform/
 │   │   │   ├── agent.py
 │   │   │   └── dashboard.py
 │   │   ├── services/
-│   │   │   └── sagemaker_client.py  # Thin boto3 wrapper for the configured PD endpoint
+│   │   │   └── sagemaker_client.py  # Thin boto3 wrapper for gmsc-pd-endpoint
 │   │   └── main.py             # FastAPI app, CORS middleware, router registration
 │   ├── alembic/                # DB migration scripts
 │   ├── tests/                  # pytest test suite
@@ -187,7 +186,7 @@ riskora.online (DNS A record → EC2 Elastic IP 15.206.37.142)
         │     └── /api/*     → FastAPI :8000 (reverse proxy, strips /api prefix)
         │
         ├── FastAPI :8000  (systemd service, 2 Uvicorn workers, localhost only)
-        │     ├── Credit Risk engine  → optional SageMaker PD endpoint
+        │     ├── Credit Risk engine  → SageMaker gmsc-pd-endpoint
         │     ├── Market Risk engine  → RDS PostgreSQL
         │     ├── Stress Test engine  → RDS + SageMaker
         │     └── LangGraph ReAct agent
@@ -201,8 +200,8 @@ riskora.online (DNS A record → EC2 Elastic IP 15.206.37.142)
         ├── RDS PostgreSQL 17  (db.t4g.micro, private subnet)
         │     fra-postgres-dev  —  only reachable from fra-app-sg
         │
-        └── Optional SageMaker PD endpoint
-              Configured separately; not provisioned or deployed by this repository
+        └── SageMaker  gmsc-pd-endpoint  (ml.m5.xlarge, real-time)
+              Deployed LightGBM PD model — gmsc-xgb-v1
 ```
 
 FastAPI is bound to `127.0.0.1:8000` and is not reachable directly from the internet. All traffic goes through Nginx. RDS is in a private subnet with a security group that only accepts connections from the EC2 instance's security group (`fra-app-sg`). SageMaker is invoked via the boto3 SDK using the EC2 instance's IAM role (`FRA-EC2Role`) — no access keys are stored on the instance.
@@ -213,7 +212,7 @@ FastAPI is bound to `127.0.0.1:8000` and is not reachable directly from the inte
 Browser → Nginx /api/credit/borrowers/B1001/assess
         → FastAPI /credit/borrowers/B1001/assess
         → credit_risk engine
-        → PDModelClient.predict()  →  configured SageMaker PD endpoint
+        → PDModelClient.predict()  →  SageMaker gmsc-pd-endpoint
         ← { pd, status, model_version, risk_drivers }
         ← engine computes LGD = 1 − recovery_rate, EAD, EL = PD × LGD × EAD
         → RiskResult persisted to RDS
@@ -463,7 +462,7 @@ There is no foreign key between portfolios and loans. The credit book (borrowers
 | EC2 t3.small | Hosts Nginx + FastAPI on Amazon Linux 2023 |
 | Elastic IP | Static IP for the EC2 instance (15.206.37.142) |
 | RDS PostgreSQL 17 (db.t4g.micro) | Primary data store, private subnet |
-| SageMaker | Optional external dependency for the LightGBM PD model; this repository does not provision it |
+| SageMaker (ml.m5.xlarge) | Hosts the deployed LightGBM PD model (`gmsc-pd-endpoint`) |
 | Amazon Bedrock | Hosts the LLM (`moonshot.kimi-k2-thinking`) per-request |
 | S3 | Stores ML model artifacts and approved ingestion inputs |
 | IAM | EC2 instance role (`FRA-EC2Role`) with least-privilege SageMaker + Bedrock access |
@@ -534,10 +533,6 @@ The frontend does not fabricate fallback data. Network failures, invalid respons
 and backend errors are shown directly in the relevant view so unavailable
 dependencies are visible to the analyst.
 
-If SageMaker is not configured or its endpoint does not exist, dashboard and
-market endpoints that do not need PD can still work, while credit and stress
-requests return a descriptive `503 dependency_unavailable` response.
-
 ---
 
 ## Deployment (EC2)
@@ -555,8 +550,9 @@ Full setup instructions are in `deployment/aws/ec2-setup.sh` (run once on a fres
 
 The workflow uses a serialized production deployment, refuses a dirty EC2 checkout, applies migrations before restarting the API, and verifies both `/health` and `/ready`. Configure required reviewers on the `production` environment if live deployment approval is required.
 
-The CD workflow deploys the commit that passed CI. It does not provision AWS
-resources, create a SageMaker endpoint, or deploy the GMSC model.
+The CD workflow deploys the commit that passed CI to the application EC2
+instance. The deployed SageMaker model is managed separately from the
+application release.
 
 ### Quick re-deploy after a code change
 
@@ -594,11 +590,11 @@ sudo systemctl status  nginx
 sudo systemctl reload  nginx
 ```
 
-### Optional SageMaker cost control
+### SageMaker cost control
 
-If a SageMaker endpoint has been provisioned separately, it is usually the
-dominant cost item. Delete it when not in use; the application will then report
-credit/stress dependency errors instead of returning mock results:
+The deployed SageMaker endpoint is the dominant cost item. It was stopped
+temporarily to control AWS cost and should be restarted before credit or stress
+analysis:
 
 ```bash
 # Delete SageMaker endpoint (model config and artifacts are preserved in S3)
@@ -629,7 +625,7 @@ Copy `backend/.env.example` to `backend/.env` and fill in the required values. O
 | `DB_PASSWORD` | Yes | — | Database password |
 | `DB_SSL_MODE` | No | `prefer` | PostgreSQL TLS mode; use `require` when RDS enforces encryption |
 | `AWS_REGION` | No | `ap-south-1` | AWS region for SageMaker and Bedrock |
-| `SAGEMAKER_ENDPOINT_NAME` | No | `gmsc-pd-endpoint` | Existing SageMaker endpoint to invoke for PD; missing endpoints produce HTTP 503 |
+| `SAGEMAKER_ENDPOINT_NAME` | No | `gmsc-pd-endpoint` | SageMaker endpoint hosting the deployed GMSC PD model |
 | `BEDROCK_MODEL_ID` | No | `moonshot.kimi-k2-thinking` | Bedrock model ID for the AI analyst |
 | `DEFAULT_RECOVERY_RATE` | No | `0.60` | Recovery rate assumption when a loan has no specific value |
 | `CREDIT_DECLINE_THRESHOLD` | No | `0.10` | PD above which a borrower is DECLINED |
@@ -689,19 +685,11 @@ The market and stress engines use a current holdings snapshot. There is no time-
 **Agent latency**
 The AI analyst makes multiple sequential tool calls, each of which may involve a SageMaker invocation. A single question can take 30–90 seconds depending on the model's reasoning depth and the number of tools called. The frontend shows a loading indicator but there is no streaming — the full response is returned in one shot.
 
-**No authentication or authorization**
-The platform has no login, no user accounts, and no access control. Anyone with the URL can read all data and run all analyses. This is acceptable for a personal demo but rules out any multi-tenant or sensitive-data use case without a significant auth layer.
-
 **Dashboard computes market risk on every load**
 The dashboard endpoint calls `assess_portfolio()` for every portfolio to aggregate a total portfolio value and headline metrics. For the current single-portfolio demo this is fast, but this pattern would be expensive at any real portfolio count. The correct approach is to cache or pre-compute these metrics and serve them from the `risk_results` table.
 
-**Unavailable dependencies are reported explicitly**
-Credit and stress analysis require the configured SageMaker endpoint. If that
-dependency is unavailable, the backend returns HTTP 503 with a descriptive
-error and the frontend displays it instead of substituting fabricated results.
-
 **No rate limiting or request validation beyond schema**
-The API has no rate limiting, no request size limits beyond Pydantic's schema validation, and no authentication. Bedrock and SageMaker calls are billed per request, so a malicious or runaway caller could incur unbounded costs.
+The API has no rate limiting or request size limits beyond Pydantic's schema validation. Bedrock and SageMaker calls are billed per request, so a malicious or runaway caller could incur unbounded costs.
 
 ---
 
