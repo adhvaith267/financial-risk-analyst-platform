@@ -9,6 +9,8 @@ WorkingDirectory=/var/www/financial-risk-analyst/backend
 # Load runtime environment variables from this file (never commit real secrets).
 EnvironmentFile=/etc/financial-risk-analyst/env
 Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/var/lib/financial-risk-analyst
+StateDirectory=financial-risk-analyst
 ExecStart=/var/www/financial-risk-analyst/backend/.venv/bin/uvicorn \
     app.main:app \
     --host 127.0.0.1 \
