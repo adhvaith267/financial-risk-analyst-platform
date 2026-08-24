@@ -135,5 +135,6 @@ def ready() -> dict:
     try:
         check_database()
     except SQLAlchemyError as exc:
+        logger.exception("Database readiness check failed")
         raise DatabaseUnavailableError("The database is not ready.") from exc
     return {"status": "ok", "checks": {"database": "ok"}}

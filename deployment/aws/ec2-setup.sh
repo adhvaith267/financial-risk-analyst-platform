@@ -72,7 +72,7 @@ sudo ln -sfn "$APP_DIR/frontend/dist" "$APP_DIR/frontend_dist"
 # ── 6. Nginx ───────────────────────────────────────────────────────────────────
 echo "==> Configuring Nginx..."
 # Update the Nginx config root to point at the actual dist path
-sudo sed "s|/var/www/financial-risk-analyst/frontend|$APP_DIR/frontend/dist|g" \
+sudo sed "s|/var/www/financial-risk-analyst|$APP_DIR|g" \
     "$APP_DIR/deployment/nginx/financial-risk.conf" | sudo tee "$NGINX_CONF" > /dev/null
 # Remove the default Nginx welcome page
 sudo rm -f /etc/nginx/conf.d/default.conf

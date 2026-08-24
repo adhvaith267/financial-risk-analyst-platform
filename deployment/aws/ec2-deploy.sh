@@ -50,7 +50,7 @@ npm ci --silent
 npm run build
 
 echo "==> Reloading Nginx configuration"
-sudo sed "s|/var/www/financial-risk-analyst/frontend|$APP_DIR/frontend/dist|g" \
+sudo sed "s|/var/www/financial-risk-analyst|$APP_DIR|g" \
     "$APP_DIR/deployment/nginx/financial-risk.conf" | sudo tee "$NGINX_CONF" > /dev/null
 sudo nginx -t
 sudo systemctl reload nginx
