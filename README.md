@@ -44,20 +44,17 @@ Riskora brings credit risk, portfolio market risk, stress testing, and tool-grou
 ## Table of contents
 
 1. [Overview](#overview)
-2. [Runtime behavior](#runtime-behavior)
-3. [Repository structure](#repository-structure)
-4. [Architecture](#architecture)
-5. [Core risk engines](#core-risk-engines)
-6. [AI analyst](#ai-analyst)
-7. [API reference](#api-reference)
-8. [Data model](#data-model)
-9. [Technology stack](#technology-stack)
-10. [Local development setup](#local-development-setup)
-11. [Deployment (EC2)](#deployment-ec2)
-12. [Environment variables](#environment-variables)
-13. [Running tests](#running-tests)
-14. [Drawbacks and known limitations](#drawbacks-and-known-limitations)
-15. [Issues that could have arisen](#issues-that-could-have-arisen)
+2. [Repository structure](#repository-structure)
+3. [Architecture](#architecture)
+4. [Core risk engines](#core-risk-engines)
+5. [AI analyst](#ai-analyst)
+6. [API reference](#api-reference)
+7. [Data model](#data-model)
+8. [Technology stack](#technology-stack)
+9. [Local development setup](#local-development-setup)
+10. [Deployment (EC2)](#deployment-ec2)
+11. [Environment variables](#environment-variables)
+12. [Running tests](#running-tests)
 
 ---
 
@@ -74,15 +71,6 @@ Riskora is a full-stack financial risk platform built as a personal project to d
 | Dashboard | Aggregated KPIs, recent analyses, and top risk drivers surfaced from stored results — no re-running the ML model on page load |
 
 The frontend is a React SPA (TypeScript, TanStack Router, Tailwind CSS v4) served as static files by Nginx. The backend is a FastAPI service with SQLAlchemy and Alembic, running on the same EC2 instance behind Nginx's `/api/` reverse proxy.
-
----
-
-## Runtime behavior
-
-- The frontend uses the current backend response contracts and does not fabricate fallback or mock analysis results.
-- Credit and stress analysis use the deployed GMSC LightGBM PD model through the configured SageMaker endpoint.
-- The GMSC endpoint was temporarily stopped to control AWS cost. Restart it before running credit or stress analysis.
-- The current production deployment uses PostgreSQL on RDS, FastAPI/Uvicorn on EC2, and Nginx for HTTPS, static files, and `/api/` proxying.
 
 ---
 
@@ -550,9 +538,9 @@ Full setup instructions are in `deployment/aws/ec2-setup.sh` (run once on a fres
 
 The workflow uses a serialized production deployment, refuses a dirty EC2 checkout, applies migrations before restarting the API, and verifies both `/health` and `/ready`. Configure required reviewers on the `production` environment if live deployment approval is required.
 
-The CD workflow deploys the commit that passed CI to the application EC2
-instance. The deployed SageMaker model is managed separately from the
-application release.
+The CD workflow deploys the application commit that passed CI to the EC2
+instance. SageMaker model releases are managed separately from application
+releases.
 
 ### Quick re-deploy after a code change
 
@@ -588,26 +576,6 @@ sudo journalctl -u     financial-risk-api -n 100
 # Nginx
 sudo systemctl status  nginx
 sudo systemctl reload  nginx
-```
-
-### SageMaker cost control
-
-The deployed SageMaker endpoint is the dominant cost item. It was stopped
-temporarily to control AWS cost and should be restarted before credit or stress
-analysis:
-
-```bash
-# Delete SageMaker endpoint (model config and artifacts are preserved in S3)
-aws sagemaker delete-endpoint --profile fra-dev --region ap-south-1 \
-  --endpoint-name gmsc-pd-endpoint
-
-# Stop EC2 instance (EBS still billed ~$0.80/mo; Elastic IP is free while associated)
-aws ec2 stop-instances --profile fra-dev --region ap-south-1 \
-  --instance-ids i-05ab2e470d0c8d247
-
-# Stop RDS (auto-restarts after 7 days)
-aws rds stop-db-instance --profile fra-dev --region ap-south-1 \
-  --db-instance-identifier fra-postgres-dev
 ```
 
 ---
@@ -661,65 +629,6 @@ Every push and pull request runs the same backend Ruff/pytest gates and frontend
 On pushes to `main`, the CD workflow (`.github/workflows/cd.yml`) runs only
 after CI succeeds, checks out the tested commit on EC2, builds the frontend,
 applies migrations, restarts `financial-risk-api`, and verifies health and
-readiness. GitHub repository dependency-graph automation is separate from
-these workflows.
+readiness.
 
 ---
-
-## Drawbacks and known limitations
-
-These are honest constraints of the current implementation, not bugs.
-
-**Single-model PD**
-The credit risk engine uses one LightGBM model trained on the GMSC consumer-credit dataset. It was not retrained on borrower-specific data. PD values should be treated as illustrative, not production-grade. A real credit system would calibrate the model to its own historical default rates and apply regulatory capital add-ons.
-
-**Fixed LGD and duration assumptions**
-LGD is computed as `1 − recovery_rate` using a flat default of 0.60 for loans that don't specify their own rate. The stress test uses a fixed bond effective duration of 17 years for all bond holdings. Both are reasonable approximations for a demo but would require asset-specific parameterization in production.
-
-**No async I/O**
-The FastAPI app uses synchronous SQLAlchemy and synchronous boto3 calls. Both the DB and SageMaker/Bedrock calls block the Uvicorn worker thread. With 2 workers, this means a maximum of 2 concurrent requests that involve I/O. Under any real load this would saturate quickly. Migrating to `asyncpg` and `aioboto3` (or an async Bedrock SDK) would be the correct fix.
-
-**Static portfolio holdings**
-The market and stress engines use a current holdings snapshot. There is no time-series of portfolio composition changes, no P&L attribution, and no intraday price data. The value history chart on the market risk view shows what the current portfolio would have been worth in the past — it is not an actual NAV track record.
-
-**Agent latency**
-The AI analyst makes multiple sequential tool calls, each of which may involve a SageMaker invocation. A single question can take 30–90 seconds depending on the model's reasoning depth and the number of tools called. The frontend shows a loading indicator but there is no streaming — the full response is returned in one shot.
-
-**Dashboard computes market risk on every load**
-The dashboard endpoint calls `assess_portfolio()` for every portfolio to aggregate a total portfolio value and headline metrics. For the current single-portfolio demo this is fast, but this pattern would be expensive at any real portfolio count. The correct approach is to cache or pre-compute these metrics and serve them from the `risk_results` table.
-
-**No rate limiting or request validation beyond schema**
-The API has no rate limiting or request size limits beyond Pydantic's schema validation. Bedrock and SageMaker calls are billed per request, so a malicious or runaway caller could incur unbounded costs.
-
----
-
-## Issues that could have arisen
-
-These are real architectural risks — things that did not become problems in this project but easily could have with different choices or at larger scale.
-
-**Case-sensitive IDs at the API boundary**
-The backend stores and queries borrower and portfolio IDs in uppercase (`B1001`,
-`P001`). The frontend normalizes user input before sending requests, while a
-missing resource remains a visible 404 instead of being replaced with another
-result.
-
-**SQLAlchemy sessions shared across threads in the agent**
-LangGraph's `ToolNode` can run tool calls concurrently in separate threads. SQLAlchemy `Session` objects are explicitly not thread-safe — sharing a single session across tool calls in a multi-threaded context would cause intermittent `DetachedInstanceError` or silent data corruption. The tools were written to open and close their own short-lived sessions per call, which avoids this entirely. Had the tools shared a single session injected at startup, this would have been a hard-to-reproduce race condition.
-
-**SageMaker model artifact version mismatch**
-The credit engine is tightly coupled to the exact feature schema (`to_pd_model_payload()`) that the deployed endpoint expects. If the model were retrained and redeployed with a different feature set or feature name casing without updating the application, every credit assessment would silently fail or return garbage scores. The mitigation used here is to return `model_version` in every response so the caller can detect a mismatch. A production system would validate the endpoint's expected input schema at startup.
-
-**Bedrock model pulling chain-of-thought into the answer**
-The Kimi K2 Thinking model returns its chain-of-thought reasoning as inline `<think>...</think>` XML blocks in the response text, rather than in a separate content field. If the `_extract_text` function in `graph.py` did not strip those blocks, the user would see hundreds of lines of internal reasoning before the actual answer. Different Bedrock models handle this differently (some use a dedicated `reasoningContent` block, others use inline text), so the extraction logic needs to handle both and be updated when the model changes.
-
-**Database schema and ORM model drift**
-Alembic generates migrations by diffing the SQLAlchemy model definitions against the current database schema. If a column is added or renamed directly in the database (e.g., via a hotfix SQL statement) without a corresponding migration, subsequent `alembic upgrade head` runs will not fix the drift, and the ORM will either fail with a column error or silently ignore the mismatch. The project avoids this by using Alembic exclusively for schema changes. CI checks the application and migration code, but production still requires migrations to be reviewed and applied through the release process.
-
-**Nginx stripping the /api prefix before FastAPI sees it**
-The Nginx config uses `proxy_pass http://127.0.0.1:8000/;` (note the trailing slash), which causes Nginx to strip the `/api/` prefix before forwarding to FastAPI. FastAPI is configured with `root_path="/api"` to reconstruct the correct URL in OpenAPI docs and redirects. If the trailing slash were removed from the `proxy_pass` directive, FastAPI would receive requests with the `/api/` prefix still intact and all route matching would fail with 404s. This is a subtle Nginx configuration gotcha that is easy to accidentally change during an edit.
-
-**RDS in a private subnet with no connection retry**
-The SQLAlchemy engine is created with `pool_pre_ping=True`, which sends a lightweight `SELECT 1` before each connection to detect stale connections. However, there is no retry logic for the case where RDS is temporarily unavailable (e.g., during a Multi-AZ failover or a manual restart). A request arriving during a ~30-second RDS failover window would receive a 500 error. Adding a retry with exponential backoff at the connection level would make the application resilient to brief DB unavailability.
-
-**EAD approximated as outstanding balance**
-The exposure at default (EAD) is approximated as `loan.outstanding_balance`. For a revolving credit facility, the actual EAD at default would include undrawn commitments, which can be significantly larger than the current balance. This is documented as an MVP assumption in the code comments but could lead to materially understated expected-loss figures for credit card or revolver portfolios. For a mortgage-only book, the approximation is reasonable.
